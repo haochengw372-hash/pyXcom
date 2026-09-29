@@ -4,6 +4,7 @@ import json
 import time
 from collections import Counter
 from pathlib import Path
+from statistics import median
 from typing import TYPE_CHECKING, Callable
 
 from .errors import PyXcomError
@@ -63,26 +64,56 @@ def _write_batch_report(
 ) -> None:
     posts = _posts(output / "posts.jsonl")
     by_author = Counter(post.author_id for post in posts)
+    month_counts = Counter((post.author_id, post.created_at_utc[:7]) for post in posts)
+    months = sorted({post.created_at_utc[:7] for post in posts})
     lines = [
-        "# X account collection report",
+        "# X 多账号采集报告",
         "",
-        f"Captured at: {now_utc()}",
-        f"Unique posts: **{result.post_count:,}**. Overall complete: **{result.complete}** ({result.reason}).",
+        f"生成时间（UTC）：{now_utc()}",
+        f"去重后 **{result.post_count:,}** 条；所有账号分页结束：**{'是' if result.complete else '否'}**（{result.reason}）。",
         "",
-        "| Account | Originals | Replies | Unique posts | Timelines finished |",
-        "| --- | ---: | ---: | ---: | --- |",
+        "| 账号 | Posts页记录 | Replies页记录 | 去重条数 | 浏览量中位数 | Posts状态 | Replies状态 |",
+        "| --- | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for account in accounts:
+        views = [
+            post.view_count
+            for post in posts
+            if post.author_id == account["user_id"] and post.view_count is not None
+        ]
+        median_views = f"{median(views):,.0f}" if views else "—"
         lines.append(
             f"| [@{account['handle']}](https://x.com/{account['handle']}) "
             f"| {account['originals']['count']:,} | {account['replies']['count']:,} "
-            f"| {by_author[account['user_id']]:,} | {'yes' if account['complete'] else 'no'} |"
+            f"| {by_author[account['user_id']]:,} | {median_views} "
+            f"| {account['originals']['reason']} | {account['replies']['reason']} |"
         )
     lines += [
         "",
-        "Completion means each account's originals and replies timeline reached its end, returned two cursor-only pages, or passed the requested UTC start date. Cursor-only completion is a platform exhaustion signal, not proof of historical completeness. Deleted, protected, withheld, or unindexed posts cannot be recovered. Counts and engagement metrics are retrieval-time snapshots.",
+        "## 每月可见帖子数（UTC）",
         "",
-        "Raw JSONL, CSV, profile snapshots, per-account cursors, and SHA-256 hashes are saved alongside this report. Authentication cookies are not saved.",
+        "| 月份 | "
+        + " | ".join("@" + account["handle"] for account in accounts)
+        + " |",
+        "| --- | " + " | ".join("---:" for _ in accounts) + " |",
+    ]
+    for month in months:
+        lines.append(
+            "| "
+            + month
+            + " | "
+            + " | ".join(
+                str(month_counts[(account["user_id"], month)]) for account in accounts
+            )
+            + " |"
+        )
+    lines += [
+        "",
+        "## 覆盖边界",
+        "",
+        "`passed_since` 表示时间线已越过指定起始日；`source_end` 表示没有下一页；`empty_timeline_end` 表示连续两个只有游标的空页。最后一种是平台分页耗尽信号，不能单独证明历史全量。`rate_limited` 和 `page_limit` 表示尚未完成，可用同一命令续抓。",
+        "",
+        "删除、受保护、地区限制或未索引的帖子无法据此恢复。互动数是抓取时快照。原始 JSONL、CSV、账号资料、各账号游标及 SHA-256 哈希与本报告一同保存；登录 cookie 不写入输出。",
         "",
     ]
     (output / "report.md").write_text("\n".join(lines), encoding="utf-8")
