@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyXcom"
+version = "0.1.0"
+description = "Collect public X profiles, posts, replies, and search results with your existing browser session"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "browser-cookie3>=0.19,<1",
+  "beautifulsoup4>=4.12,<5",
+  "httpx>=0.27,<1",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Internet :: WWW/HTTP",
+]
+
+[project.urls]
+Homepage = "https://github.com/haochengw372-hash/pyXcom"
+Repository = "https://github.com/haochengw372-hash/pyXcom"
+
+[project.scripts]
+pyxcom = "pyxcom.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyxcom"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src/pyxcom", "/README.md", "/pyproject.toml", "/examples"]

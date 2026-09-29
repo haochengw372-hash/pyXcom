@@ -1,0 +1,11 @@
+.venv/
+.clean-venv/
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+output/
+data/
+*.cookies.json
+.env
