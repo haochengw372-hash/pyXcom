@@ -12,4 +12,4 @@ __all__ = [
     "finalize_collection",
     "validate_collection",
 ]
-__version__ = "0.2.1"
+__version__ = "0.2.2"

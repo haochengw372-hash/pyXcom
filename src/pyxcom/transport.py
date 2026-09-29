@@ -2,7 +2,9 @@
 
 import json
 import re
+import time
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 import httpx
 
 from .errors import APIError, RateLimitError
@@ -46,10 +48,26 @@ class XTransport:
         self._x.close()
         self._assets.close()
 
+    def _get(self, client: httpx.Client, url: str, **kwargs) -> httpx.Response:
+        """Retry transient transport/5xx errors, then surface a safe message."""
+        for attempt in range(3):
+            try:
+                response = client.get(url, **kwargs)
+            except httpx.RequestError as exc:
+                if attempt == 2:
+                    raise APIError(
+                        f"Network request to {urlsplit(url).netloc} failed after 3 attempts"
+                    ) from exc
+            else:
+                if response.status_code not in {502, 503, 504} or attempt == 2:
+                    return response
+            time.sleep(2**attempt)
+        raise APIError("Network retry loop ended unexpectedly")
+
     def discover(self, *, refresh: bool = False) -> None:
         if self._operations and not refresh:
             return
-        response = self._x.get("https://x.com/")
+        response = self._get(self._x, "https://x.com/")
         if response.status_code != 200:
             raise APIError(f"X homepage returned HTTP {response.status_code}")
         match = _MAIN_SCRIPT.search(response.text)
@@ -57,7 +75,7 @@ class XTransport:
             raise APIError(
                 "X web bundle was not found; the site layout may have changed"
             )
-        js_response = self._assets.get(match.group(0))
+        js_response = self._get(self._assets, match.group(0))
         if js_response.status_code != 200:
             raise APIError(f"X web bundle returned HTTP {js_response.status_code}")
         operations = {
@@ -103,7 +121,7 @@ class XTransport:
             params["fieldToggles"] = json.dumps(field_toggles, separators=(",", ":"))
         query_id = self._operations[operation]
         url = f"https://x.com/i/api/graphql/{query_id}/{operation}"
-        response = self._x.get(url, params=params, headers=self._headers())
+        response = self._get(self._x, url, params=params, headers=self._headers())
         if response.status_code == 429:
             reset = response.headers.get("x-rate-limit-reset")
             raise RateLimitError(

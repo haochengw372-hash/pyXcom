@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from .errors import PyXcomError
-from .models import CollectionResult, Post
+from .models import CollectionResult, Post, Profile
 from .storage import PostStore, _atomic_json
 from .transport import now_utc
 
@@ -107,6 +107,12 @@ def collect_accounts(
         raise ValueError("At least one account is required")
     output = Path(output_dir).expanduser()
     output.mkdir(parents=True, exist_ok=True)
+    saved_profiles = output / "profiles.json"
+    if saved_profiles.exists():
+        for handle, record in json.loads(
+            saved_profiles.read_text(encoding="utf-8")
+        ).items():
+            client._profile_cache[handle.lower()] = Profile(**record)
     profiles = {
         client.get_user(handle).handle: client.get_user(handle).to_dict()
         for handle in handles
@@ -175,6 +181,8 @@ def collect_accounts(
             output / "account_manifest.json",
             {"query": query, "accounts": accounts, "updated_at_utc": now_utc()},
         )
+        checkpoint = store.finish(complete=False, reason="in_progress")
+        _write_batch_report(output, accounts, checkpoint)
         if all(account["complete"] for account in accounts):
             reason = "all_accounts_complete"
             break
