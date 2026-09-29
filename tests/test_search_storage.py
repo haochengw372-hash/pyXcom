@@ -9,6 +9,7 @@ import httpx
 from pyxcom.models import Post
 from pyxcom.search import MirrorSearch
 from pyxcom.storage import PostStore
+from pyxcom.validate import finalize_collection, validate_collection
 
 
 class SearchStorageTests(unittest.TestCase):
@@ -81,6 +82,23 @@ class SearchStorageTests(unittest.TestCase):
             store = PostStore(folder, query={"kind": "legacy"})
             self.assertEqual(store.count, 1)
             store.finish(complete=True, reason="source_end")
+
+    def test_finalize_recovers_interrupted_export(self):
+        post = Post(
+            id="1234567890",
+            author_id="1",
+            author_handle="sample",
+            created_at_utc="2025-09-29T07:39:00+00:00",
+            text="hello",
+            url="https://x.com/sample/status/1234567890",
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            store = PostStore(folder, query={"kind": "test", "since": "2025-09-29"})
+            store.append_page([post], "next")
+            result = finalize_collection(folder)
+            self.assertEqual(result.post_count, 1)
+            self.assertTrue(validate_collection(folder)["valid"])
 
 
 if __name__ == "__main__":

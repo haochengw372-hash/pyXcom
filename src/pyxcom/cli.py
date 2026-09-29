@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .client import XClient
 from .errors import PyXcomError
-from .validate import validate_collection
+from .validate import finalize_collection, validate_collection
 
 
 def _common_parser() -> argparse.ArgumentParser:
@@ -95,6 +95,10 @@ def build_parser() -> argparse.ArgumentParser:
         "validate", help="Check saved rows, scope, and SHA-256 hashes"
     )
     validate.add_argument("--output", type=Path, required=True)
+    finalize = commands.add_parser(
+        "finalize", help="Rebuild CSV and report after an interrupted run"
+    )
+    finalize.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -116,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
             validation = validate_collection(args.output)
             print(json.dumps(validation, ensure_ascii=False))
             return 0 if validation["valid"] else 3
+        if args.command == "finalize":
+            result = finalize_collection(args.output)
+            print(json.dumps(result.to_dict(), ensure_ascii=False))
+            return 0
         with XClient(
             browser=args.browser,
             profile=args.profile,

@@ -69,7 +69,7 @@ def _write_batch_report(
         f"Captured at: {now_utc()}",
         f"Unique posts: **{result.post_count:,}**. Overall complete: **{result.complete}** ({result.reason}).",
         "",
-        "| Account | Originals | Replies | Unique posts | Date boundary reached |",
+        "| Account | Originals | Replies | Unique posts | Timelines finished |",
         "| --- | ---: | ---: | ---: | --- |",
     ]
     for account in accounts:
@@ -80,7 +80,7 @@ def _write_batch_report(
         )
     lines += [
         "",
-        "Completion means each account's originals and replies timeline reached its end or passed the requested UTC start date. It does not recover deleted, protected, withheld, or unindexed posts. Counts and engagement metrics are retrieval-time snapshots.",
+        "Completion means each account's originals and replies timeline reached its end, returned two cursor-only pages, or passed the requested UTC start date. Cursor-only completion is a platform exhaustion signal, not proof of historical completeness. Deleted, protected, withheld, or unindexed posts cannot be recovered. Counts and engagement metrics are retrieval-time snapshots.",
         "",
         "Raw JSONL, CSV, profile snapshots, per-account cursors, and SHA-256 hashes are saved alongside this report. Authentication cookies are not saved.",
         "",

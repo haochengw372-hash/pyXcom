@@ -164,6 +164,37 @@ def timeline_posts(data: dict, *, captured_at_utc: str | None = None) -> list[Po
     return list(posts.values())
 
 
+def timeline_primary_posts(
+    data: dict, *, captured_at_utc: str | None = None
+) -> list[Post]:
+    """Read timeline entries without recursively counting quoted post content."""
+    instructions = None
+    for node in _walk(data.get("data", data)):
+        if isinstance(node.get("instructions"), list):
+            instructions = node["instructions"]
+            break
+    if instructions is None:
+        return []
+    posts: dict[str, Post] = {}
+    for instruction in instructions:
+        for entry in instruction.get("entries", []):
+            content = entry.get("content") or {}
+            items = [content]
+            for module_item in content.get("items", []):
+                items.append(module_item.get("item") or module_item)
+            for item in items:
+                result = (
+                    (item.get("itemContent") or {})
+                    .get("tweet_results", {})
+                    .get("result")
+                )
+                if isinstance(result, dict):
+                    post = parse_post(result, captured_at_utc=captured_at_utc)
+                    if post is not None:
+                        posts[post.id] = post
+    return list(posts.values())
+
+
 def bottom_cursor(data: dict) -> str | None:
     """Find the bottom pagination cursor without relying on one timeline shape."""
     for node in _walk(data.get("data", data)):

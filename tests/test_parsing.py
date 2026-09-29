@@ -1,6 +1,12 @@
 import unittest
 
-from pyxcom.parse import bottom_cursor, parse_post, parse_profile, timeline_posts
+from pyxcom.parse import (
+    bottom_cursor,
+    parse_post,
+    parse_profile,
+    timeline_posts,
+    timeline_primary_posts,
+)
 
 
 class ParsingTests(unittest.TestCase):
@@ -102,7 +108,88 @@ class ParsingTests(unittest.TestCase):
             }
         }
         self.assertEqual(len(timeline_posts(data)), 1)
+        self.assertEqual(len(timeline_primary_posts(data)), 1)
         self.assertEqual(bottom_cursor(data), "next-cursor")
+
+    def test_primary_posts_ignore_nested_quote_and_empty_cursor_page(self):
+        quote = {
+            "rest_id": "1234567891",
+            "core": {"user_results": {"result": {"core": {"screen_name": "sample"}}}},
+            "legacy": {
+                "user_id_str": "123",
+                "created_at": "Tue Sep 29 07:39:00 +0000 2026",
+                "full_text": "newer quote",
+            },
+        }
+        old_post = {
+            "rest_id": "1234567890",
+            "core": {"user_results": {"result": {"core": {"screen_name": "sample"}}}},
+            "legacy": {
+                "user_id_str": "123",
+                "created_at": "Wed May 29 07:39:00 +0000 2024",
+                "full_text": "older timeline post",
+            },
+            "quoted_status_result": {"tweet_results": {"result": quote}},
+        }
+        data = {
+            "data": {
+                "user": {
+                    "result": {
+                        "timeline": {
+                            "timeline": {
+                                "instructions": [
+                                    {
+                                        "entries": [
+                                            {
+                                                "entryId": "tweet-1234567890",
+                                                "content": {
+                                                    "itemContent": {
+                                                        "tweet_results": {
+                                                            "result": old_post
+                                                        }
+                                                    }
+                                                },
+                                            },
+                                            {
+                                                "entryId": "cursor-bottom",
+                                                "content": {"value": "next"},
+                                            },
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.assertEqual(len(timeline_posts(data)), 2)
+        primary = timeline_primary_posts(data)
+        self.assertEqual([item.id for item in primary], ["1234567890"])
+        self.assertEqual(primary[0].created_at_utc[:10], "2024-05-29")
+        empty = {
+            "data": {
+                "user": {
+                    "result": {
+                        "timeline": {
+                            "timeline": {
+                                "instructions": [
+                                    {
+                                        "entries": [
+                                            {
+                                                "entryId": "cursor-bottom",
+                                                "content": {"value": "next"},
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.assertEqual(timeline_primary_posts(empty), [])
 
 
 if __name__ == "__main__":

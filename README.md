@@ -48,9 +48,10 @@ Collect multiple accounts with the same date window. The package verifies each X
   --output output/ai-accounts-year
 
 .venv/bin/pyxcom validate --output output/ai-accounts-year
+.venv/bin/pyxcom finalize --output output/ai-accounts-year
 ```
 
-Repeat the same `batch` command to resume. `--rounds 0 --wait-on-rate-limit` keeps paging until all six accounts pass the date boundary, waiting for X's rate-limit window when needed. The output root includes `profiles.json`, `account_manifest.json`, `report.md`, combined `posts.csv`/`posts.jsonl`, and one resumable folder per account. `validate` checks row counts, dates, authors, and file hashes using only saved artifacts.
+Repeat the same `batch` command to resume. `--rounds 0 --wait-on-rate-limit` keeps paging until all timelines pass the date boundary or exhaust their visible pages, waiting for X's rate-limit window when needed. The output root includes `profiles.json`, `account_manifest.json`, `report.md`, combined `posts.csv`/`posts.jsonl`, and one resumable folder per account. `validate` checks row counts, dates, authors, and file hashes using only saved artifacts. `finalize` rebuilds CSV, hashes, and the report from the saved JSONL if a run was interrupted mid-round.
 
 Search **keyword + duration + specified user** directly from X. pyXcom reads that user's originals and replies and filters their text locally:
 

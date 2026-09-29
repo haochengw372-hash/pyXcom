@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyXcom"
-version = "0.2.0"
+version = "0.2.1"
 description = "Collect public X profiles, posts, replies, and search results with your existing browser session"
 readme = "README.md"
 requires-python = ">=3.10"

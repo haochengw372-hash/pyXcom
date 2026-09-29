@@ -11,7 +11,7 @@ from typing import Iterator
 from .auth import load_x_cookies
 from .errors import APIError, RateLimitError
 from .models import CollectionResult, Post, Profile
-from .parse import bottom_cursor, timeline_posts
+from .parse import bottom_cursor, timeline_primary_posts
 from .search import MirrorSearch
 from .storage import PostStore
 from .transport import TWEET_FEATURES, XTransport
@@ -125,6 +125,13 @@ class XClient:
             field_toggles={},
         )
 
+    def get_raw_user_timeline(
+        self, handle: str, *, timeline: str = "posts", cursor: str | None = None
+    ) -> dict:
+        """Return the current raw X timeline page for diagnosis or custom fields."""
+        profile = self.get_user(handle)
+        return self._x.user_timeline_page(profile.id, timeline=timeline, cursor=cursor)
+
     def iter_user_posts(
         self,
         handle: str,
@@ -143,6 +150,7 @@ class XClient:
         pages = 0
         yielded = 0
         old_pages = 0
+        empty_pages = 0
         while True:
             if cursor and cursor in seen_cursors:
                 return
@@ -152,7 +160,9 @@ class XClient:
                 profile.id, timeline=timeline, cursor=cursor
             )
             authored = [
-                post for post in timeline_posts(payload) if post.author_id == profile.id
+                post
+                for post in timeline_primary_posts(payload)
+                if post.author_id == profile.id
             ]
             for post in authored:
                 if post.id in seen_ids or not _within(post, since, until):
@@ -175,8 +185,14 @@ class XClient:
                 old_pages += 1
             else:
                 old_pages = 0
+            empty_pages = empty_pages + 1 if not authored else 0
             cursor = bottom_cursor(payload)
-            if not cursor or old_pages >= 2 or (max_pages and pages >= max_pages):
+            if (
+                not cursor
+                or old_pages >= 2
+                or empty_pages >= 2
+                or (max_pages and pages >= max_pages)
+            ):
                 return
             time.sleep(self.delay)
 
@@ -210,6 +226,7 @@ class XClient:
         seen_cursors: set[str] = set()
         pages_this_run = 0
         old_pages = 0
+        empty_pages = 0
         while True:
             if cursor and cursor in seen_cursors:
                 return store.finish(complete=False, reason="repeated_cursor")
@@ -223,7 +240,9 @@ class XClient:
                 store.state["rate_reset_at"] = exc.reset_at
                 return store.finish(complete=False, reason="rate_limited")
             authored = [
-                post for post in timeline_posts(payload) if post.author_id == profile.id
+                post
+                for post in timeline_primary_posts(payload)
+                if post.author_id == profile.id
             ]
             filtered = [
                 replace(
@@ -246,10 +265,13 @@ class XClient:
                 old_pages += 1
             else:
                 old_pages = 0
+            empty_pages = empty_pages + 1 if not authored else 0
             if not next_cursor:
                 return store.finish(complete=True, reason="source_end")
             if old_pages >= 2:
                 return store.finish(complete=True, reason="passed_since")
+            if empty_pages >= 2:
+                return store.finish(complete=True, reason="empty_timeline_end")
             if limit and store.count >= limit:
                 return store.finish(complete=False, reason="item_limit")
             if max_pages and pages_this_run >= max_pages:

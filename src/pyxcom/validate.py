@@ -5,6 +5,48 @@ import hashlib
 import json
 from pathlib import Path
 
+from .models import CollectionResult
+from .storage import PostStore, _atomic_json
+from .transport import now_utc
+
+
+def finalize_collection(output_dir: str | Path) -> CollectionResult:
+    """Rebuild CSV, hashes, and report after an interrupted collection."""
+    output = Path(output_dir).expanduser()
+    state = json.loads((output / "state.json").read_text(encoding="utf-8"))
+    store = PostStore(output, query=state["query"])
+    profiles_path = output / "profiles.json"
+    if profiles_path.exists():
+        from .batch import _account_status, _write_batch_report
+
+        profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
+        accounts = [
+            _account_status(output, handle, profile)
+            for handle, profile in profiles.items()
+        ]
+        store.state["pages_fetched"] = sum(
+            account[kind]["pages"]
+            for account in accounts
+            for kind in ("originals", "replies")
+        )
+        complete = all(account["complete"] for account in accounts)
+        reason = "all_accounts_complete" if complete else "interrupted_or_partial"
+        _atomic_json(
+            output / "account_manifest.json",
+            {
+                "query": state["query"],
+                "accounts": accounts,
+                "updated_at_utc": now_utc(),
+            },
+        )
+        result = store.finish(complete=complete, reason=reason)
+        _write_batch_report(output, accounts, result)
+        return result
+    return store.finish(
+        complete=state.get("complete", False),
+        reason=state.get("reason", "interrupted_or_partial"),
+    )
+
 
 def validate_collection(output_dir: str | Path) -> dict:
     output = Path(output_dir).expanduser()
