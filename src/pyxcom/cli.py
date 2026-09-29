@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .client import XClient
 from .errors import PyXcomError
+from .validate import validate_collection
 
 
 def _common_parser() -> argparse.ArgumentParser:
@@ -19,7 +20,10 @@ def _common_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--proxy", help="HTTP or SOCKS proxy URL for X and mirror requests"
     )
-    common.add_argument("--mirror-base", default="https://x.noodl3.net")
+    common.add_argument(
+        "--mirror-base",
+        help="Explicit HTTPS mirror for cross-user search; sends search terms to that mirror",
+    )
     common.add_argument(
         "--delay", type=float, default=1.0, help="Seconds between pages"
     )
@@ -73,6 +77,24 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--max-pages", type=int)
     search.add_argument("--limit", type=int)
     search.add_argument("--output", type=Path, required=True)
+    batch = commands.add_parser(
+        "batch",
+        parents=[common],
+        help="Collect several accounts and write a combined report",
+    )
+    batch.add_argument("--handles", nargs="+", required=True)
+    batch.add_argument("--since", required=True)
+    batch.add_argument("--until", required=True)
+    batch.add_argument("--pages-per-round", type=int, default=5)
+    batch.add_argument(
+        "--rounds", type=int, default=1, help="0 keeps resuming until complete"
+    )
+    batch.add_argument("--wait-on-rate-limit", action="store_true")
+    batch.add_argument("--output", type=Path, required=True)
+    validate = commands.add_parser(
+        "validate", help="Check saved rows, scope, and SHA-256 hashes"
+    )
+    validate.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -90,6 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "validate":
+            validation = validate_collection(args.output)
+            print(json.dumps(validation, ensure_ascii=False))
+            return 0 if validation["valid"] else 3
         with XClient(
             browser=args.browser,
             profile=args.profile,
@@ -135,6 +161,20 @@ def main(argv: list[str] | None = None) -> int:
                     until=args.until,
                     max_pages=args.max_pages,
                     limit=args.limit,
+                )
+                print(json.dumps(result.to_dict(), ensure_ascii=False))
+            elif args.command == "batch":
+                result = client.save_accounts(
+                    args.handles,
+                    args.output,
+                    since=args.since,
+                    until=args.until,
+                    pages_per_round=args.pages_per_round,
+                    rounds=args.rounds,
+                    wait_on_rate_limit=args.wait_on_rate_limit,
+                    progress=lambda item: print(
+                        json.dumps(item, ensure_ascii=False), flush=True
+                    ),
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))
     except (PyXcomError, ValueError) as exc:

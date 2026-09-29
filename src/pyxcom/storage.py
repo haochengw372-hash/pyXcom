@@ -40,7 +40,7 @@ class PostStore:
             }
         self._posts: dict[str, Post] = {}
         if self._jsonl.exists():
-            for line in self._jsonl.read_text(encoding="utf-8").splitlines():
+            for line in self._jsonl.read_text(encoding="utf-8").split("\n"):
                 if line.strip():
                     post = Post(**json.loads(line))
                     self._posts[post.id] = post
@@ -63,7 +63,7 @@ class PostStore:
             for post in posts:
                 if post.id in self._posts:
                     continue
-                file.write(json.dumps(post.to_dict(), ensure_ascii=False) + "\n")
+                file.write(json.dumps(post.to_dict(), ensure_ascii=True) + "\n")
                 self._posts[post.id] = post
                 added += 1
             file.flush()

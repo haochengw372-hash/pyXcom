@@ -111,9 +111,11 @@ class XTransport:
                 int(reset) if reset and reset.isdigit() else None,
             )
         if response.status_code == 404 and not response.content:
-            # Query IDs and route availability can change independently.
-            raise APIError(
-                f"X returned an empty 404 for {operation}; retry later or update pyXcom"
+            # X also uses an empty 404 when a read route is temporarily limited.
+            reset = response.headers.get("x-rate-limit-reset")
+            raise RateLimitError(
+                f"X returned an empty 404 for {operation}; retry after the rate window",
+                int(reset) if reset and reset.isdigit() else None,
             )
         if response.status_code != 200:
             raise APIError(f"X returned HTTP {response.status_code} for {operation}")

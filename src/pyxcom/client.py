@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .auth import load_x_cookies
-from .errors import RateLimitError
+from .errors import APIError, RateLimitError
 from .models import CollectionResult, Post, Profile
 from .parse import bottom_cursor, timeline_posts
 from .search import MirrorSearch
@@ -56,7 +56,7 @@ class XClient:
     """Read public X data using a manually logged-in Chrome or Edge session.
 
     No browser is launched or controlled. Cookies are read into memory and sent
-    only to x.com. The search mirror uses a separate cookie-free HTTP client.
+    only to x.com. A search mirror is used only when explicitly configured.
     """
 
     def __init__(
@@ -66,18 +66,24 @@ class XClient:
         profile: str | None = None,
         cookie_db: str | Path | None = None,
         proxy: str | None = None,
-        mirror_base: str = "https://x.noodl3.net",
+        mirror_base: str | None = None,
         delay: float = 1.0,
         timeout: float = 30,
     ) -> None:
         cookies = load_x_cookies(browser, profile=profile, cookie_db=cookie_db)
         self._x = XTransport(cookies, proxy=proxy, timeout=timeout)
-        self._mirror = MirrorSearch(base_url=mirror_base, proxy=proxy, timeout=timeout)
+        self._mirror = (
+            MirrorSearch(base_url=mirror_base, proxy=proxy, timeout=timeout)
+            if mirror_base
+            else None
+        )
+        self._profile_cache: dict[str, Profile] = {}
         self.delay = max(0.0, delay)
 
     def close(self) -> None:
         self._x.close()
-        self._mirror.close()
+        if self._mirror is not None:
+            self._mirror.close()
 
     def __enter__(self) -> "XClient":
         return self
@@ -86,7 +92,11 @@ class XClient:
         self.close()
 
     def get_user(self, handle: str) -> Profile:
-        return self._x.get_profile(_handle(handle))
+        normalized = _handle(handle)
+        key = normalized.lower()
+        if key not in self._profile_cache:
+            self._profile_cache[key] = self._x.get_profile(normalized)
+        return self._profile_cache[key]
 
     def get_post(self, post_id_or_url: str) -> Post:
         post = self._x.get_post(_post_id(post_id_or_url))
@@ -209,7 +219,8 @@ class XClient:
                 payload = self._x.user_timeline_page(
                     profile.id, timeline=timeline, cursor=cursor
                 )
-            except RateLimitError:
+            except RateLimitError as exc:
+                store.state["rate_reset_at"] = exc.reset_at
                 return store.finish(complete=False, reason="rate_limited")
             authored = [
                 post for post in timeline_posts(payload) if post.author_id == profile.id
@@ -224,6 +235,7 @@ class XClient:
                 if _within(post, since, until)
             ]
             next_cursor = bottom_cursor(payload)
+            store.state.pop("rate_reset_at", None)
             store.append_page(filtered, next_cursor)
             pages_this_run += 1
             if (
@@ -286,9 +298,7 @@ class XClient:
             return store.finish(complete=True, reason="both_timelines_complete")
         combined: dict[str, Post] = {}
         for child in (output / "originals", output / "replies"):
-            for line in (
-                (child / "posts.jsonl").read_text(encoding="utf-8").splitlines()
-            ):
+            for line in (child / "posts.jsonl").read_text(encoding="utf-8").split("\n"):
                 if line.strip():
                     post = Post(**json.loads(line))
                     combined[post.id] = post
@@ -313,24 +323,52 @@ class XClient:
     ) -> Iterator[Post]:
         since, until = _dates(since, until)
         user = _handle(user) if user else None
-        cursor: str | None = self._mirror.initial_url(
+        if not keyword.strip():
+            raise ValueError("keyword cannot be empty")
+        if self._mirror is None:
+            if user is None:
+                raise APIError(
+                    "Cross-user keyword search requires an explicit mirror_base; "
+                    "search within one user with user=... to stay on X"
+                )
+            seen_ids: set[str] = set()
+            yielded = 0
+            needle = keyword.casefold()
+            for timeline in ("posts", "replies"):
+                for post in self.iter_user_posts(
+                    user,
+                    timeline=timeline,
+                    since=since,
+                    until=until,
+                    max_pages=max_pages,
+                ):
+                    if post.id in seen_ids or needle not in post.text.casefold():
+                        continue
+                    seen_ids.add(post.id)
+                    yield post
+                    yielded += 1
+                    if limit and yielded >= limit:
+                        return
+            return
+        mirror = self._mirror
+        cursor: str | None = mirror.initial_url(
             keyword, since=since, until=until, user=user
         )
         seen_cursors: set[str] = set()
-        seen_ids: set[str] = set()
+        mirror_seen_ids: set[str] = set()
         pages = 0
         yielded = 0
         while cursor and cursor not in seen_cursors:
             seen_cursors.add(cursor)
-            page = self._mirror.page(cursor)
+            page = mirror.page(cursor)
             for offset in range(0, len(page.post_ids), 50):
                 posts = self._x.get_posts(page.post_ids[offset : offset + 50])
                 for post in posts:
-                    if post.id in seen_ids or not _within(post, since, until):
+                    if post.id in mirror_seen_ids or not _within(post, since, until):
                         continue
                     if user and post.author_handle.lower() != user.lower():
                         continue
-                    seen_ids.add(post.id)
+                    mirror_seen_ids.add(post.id)
                     yield replace(
                         post,
                         discovery_source="nitter_search",
@@ -361,18 +399,36 @@ class XClient:
     ) -> CollectionResult:
         since, until = _dates(since, until)
         user = _handle(user) if user else None
+        if not keyword.strip():
+            raise ValueError("keyword cannot be empty")
+        if self._mirror is None:
+            if user is None:
+                raise APIError(
+                    "Cross-user keyword search requires an explicit --mirror-base; "
+                    "use --user for direct X search"
+                )
+            return self._save_direct_user_search(
+                keyword,
+                user,
+                output_dir,
+                since=since,
+                until=until,
+                max_pages=max_pages,
+                limit=limit,
+            )
+        mirror = self._mirror
         query = {
-            "kind": "search",
+            "kind": "search_mirror",
             "keyword": keyword,
             "since": since,
             "until": until,
             "user": user,
-            "mirror": self._mirror.base_url,
+            "mirror": mirror.base_url,
         }
         store = PostStore(output_dir, query=query)
         if store.complete:
             return store.finish(complete=True, reason=store.state["reason"])
-        cursor = store.cursor or self._mirror.initial_url(
+        cursor = store.cursor or mirror.initial_url(
             keyword, since=since, until=until, user=user
         )
         seen_cursors: set[str] = set()
@@ -382,7 +438,7 @@ class XClient:
                 return store.finish(complete=False, reason="repeated_cursor")
             seen_cursors.add(cursor)
             try:
-                page = self._mirror.page(cursor)
+                page = mirror.page(cursor)
                 posts = self._x.get_posts(page.post_ids)
             except RateLimitError:
                 return store.finish(complete=False, reason="rate_limited")
@@ -410,3 +466,84 @@ class XClient:
             cursor = page.next_url
             time.sleep(self.delay)
         return store.finish(complete=True, reason="source_end")
+
+    def _save_direct_user_search(
+        self,
+        keyword: str,
+        user: str,
+        output_dir: str | Path,
+        *,
+        since: str | None,
+        until: str | None,
+        max_pages: int | None,
+        limit: int | None,
+    ) -> CollectionResult:
+        output = Path(output_dir)
+        activity = self.save_user_activity(
+            user,
+            output / "source",
+            since=since,
+            until=until,
+            max_pages=max_pages,
+        )
+        store = PostStore(
+            output,
+            query={
+                "kind": "search_direct_user",
+                "keyword": keyword,
+                "user": user,
+                "since": since,
+                "until": until,
+            },
+        )
+        if store.complete and activity.complete:
+            return store.finish(complete=True, reason="both_timelines_complete")
+        matches: list[Post] = []
+        needle = keyword.casefold()
+        for line in (
+            (output / "source" / "posts.jsonl").read_text(encoding="utf-8").split("\n")
+        ):
+            if line.strip():
+                post = Post(**json.loads(line))
+                if needle in post.text.casefold():
+                    matches.append(post)
+        if limit is not None:
+            matches = matches[: max(0, limit)]
+        store.append_page(matches, None)
+        store.state["pages_fetched"] = activity.pages_fetched
+        capped = limit is not None and len(matches) >= limit
+        return store.finish(
+            complete=activity.complete and not capped,
+            reason="item_limit" if capped else activity.reason,
+        )
+
+    def save_accounts(
+        self,
+        handles: list[str],
+        output_dir: str | Path,
+        *,
+        since: str,
+        until: str,
+        pages_per_round: int = 5,
+        rounds: int = 1,
+        wait_on_rate_limit: bool = False,
+        progress=None,
+    ) -> CollectionResult:
+        """Collect several verified X accounts with resumable round-robin paging."""
+        from .batch import collect_accounts
+
+        normalized_since, normalized_until = _dates(since, until)
+        if normalized_since is None or normalized_until is None:
+            raise ValueError("Batch collection requires since and until dates")
+        canonical = [_handle(handle) for handle in handles]
+        return collect_accounts(
+            self,
+            canonical,
+            output_dir,
+            since=normalized_since,
+            until=normalized_until,
+            pages_per_round=pages_per_round,
+            rounds=rounds,
+            wait_on_rate_limit=wait_on_rate_limit,
+            progress=progress,
+        )
