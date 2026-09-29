@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .client import XClient
 from .errors import PyXcomError
+from .schema import apply_role_schema, write_schema_report
 from .validate import finalize_collection, validate_collection
 
 
@@ -99,6 +100,13 @@ def build_parser() -> argparse.ArgumentParser:
         "finalize", help="Rebuild CSV and report after an interrupted run"
     )
     finalize.add_argument("--output", type=Path, required=True)
+    schema = commands.add_parser(
+        "schema", help="Report field coverage and optionally add main/comment columns"
+    )
+    schema.add_argument("--output", type=Path, required=True)
+    schema.add_argument(
+        "--apply", action="store_true", help="Backfill role/type in saved CSV and JSONL"
+    )
     return parser
 
 
@@ -123,6 +131,28 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "finalize":
             result = finalize_collection(args.output)
             print(json.dumps(result.to_dict(), ensure_ascii=False))
+            return 0
+        if args.command == "schema":
+            summary = (
+                apply_role_schema(args.output)
+                if args.apply
+                else write_schema_report(args.output)
+            )
+            print(
+                json.dumps(
+                    {
+                        "post_count": summary["post_count"],
+                        "post_field_count": summary["post_field_count"],
+                        "role_counts": summary["role_counts"],
+                        "type_counts": summary["type_counts"],
+                        "schema_report": str(args.output / "schema_report.md"),
+                        "changed_directories": len(
+                            summary.get("changed_directories", [])
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+            )
             return 0
         with XClient(
             browser=args.browser,

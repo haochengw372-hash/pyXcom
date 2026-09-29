@@ -64,6 +64,7 @@ def _write_batch_report(
 ) -> None:
     posts = _posts(output / "posts.jsonl")
     by_author = Counter(post.author_id for post in posts)
+    role_counts = Counter((post.author_id, post.post_role) for post in posts)
     month_counts = Counter((post.author_id, post.created_at_utc[:7]) for post in posts)
     months = sorted({post.created_at_utc[:7] for post in posts})
     lines = [
@@ -72,8 +73,8 @@ def _write_batch_report(
         f"生成时间（UTC）：{now_utc()}",
         f"去重后 **{result.post_count:,}** 条；所有账号分页结束：**{'是' if result.complete else '否'}**（{result.reason}）。",
         "",
-        "| 账号 | Posts页记录 | Replies页记录 | 去重条数 | 浏览量中位数 | Posts状态 | Replies状态 |",
-        "| --- | ---: | ---: | ---: | ---: | --- | --- |",
+        "| 账号 | 主帖 | 评论/回复 | 转发 | 去重条数 | 浏览量中位数 | Posts状态 | Replies状态 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for account in accounts:
         views = [
@@ -84,11 +85,16 @@ def _write_batch_report(
         median_views = f"{median(views):,.0f}" if views else "—"
         lines.append(
             f"| [@{account['handle']}](https://x.com/{account['handle']}) "
-            f"| {account['originals']['count']:,} | {account['replies']['count']:,} "
+            f"| {role_counts[(account['user_id'], 'main')]:,} "
+            f"| {role_counts[(account['user_id'], 'comment')]:,} "
+            f"| {role_counts[(account['user_id'], 'repost')]:,} "
             f"| {by_author[account['user_id']]:,} | {median_views} "
             f"| {account['originals']['reason']} | {account['replies']['reason']} |"
         )
     lines += [
+        "",
+        "分类按每条帖子自身的回复/引用/转发关系，不按 Posts 或 Replies 标签页来源；两种标签页可能显示同一帖。`main` 包含原创和引用帖，`comment` 是有父帖 ID 的回复。",
+        "本次采集按目标账号的作者 ID 筛选，纯转发的原作者不是目标账号，因此未纳入表内；`repost=0` 不代表账号从未转发。",
         "",
         "## 每月可见帖子数（UTC）",
         "",

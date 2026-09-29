@@ -32,6 +32,7 @@ class BatchReportTests(unittest.TestCase):
             _write_batch_report(output, [account], result)
             report = (output / "report.md").read_text()
             self.assertIn("@sample", report)
+            self.assertIn("主帖", report)
             self.assertIn("2026-09", report)
             self.assertIn("100", report)
             self.assertIn("empty_timeline_end", report)

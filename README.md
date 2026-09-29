@@ -49,9 +49,16 @@ Collect multiple accounts with the same date window. The package verifies each X
 
 .venv/bin/pyxcom validate --output output/ai-accounts-year
 .venv/bin/pyxcom finalize --output output/ai-accounts-year
+.venv/bin/pyxcom schema --output output/ai-accounts-year --apply
 ```
 
 Repeat the same `batch` command to resume. `--rounds 0 --wait-on-rate-limit` keeps paging until all timelines pass the date boundary or exhaust their visible pages, waiting for X's rate-limit window when needed. Every round writes a consistent checkpoint before waiting; short network failures are retried. The output root includes `profiles.json`, `account_manifest.json`, a Chinese `report.md` with per-account and monthly counts, combined `posts.csv`/`posts.jsonl`, and one resumable folder per account. `validate` checks row counts, dates, authors, and file hashes using only saved artifacts. `finalize` rebuilds CSV, hashes, and the report from the saved JSONL if a run was interrupted mid-round.
+
+`schema` writes `schema.json` and a Chinese `schema_report.md` listing every standardized post/profile field and its coverage. With `--apply`, it adds `post_role` and `post_type` to existing JSONL/CSV files, updates hashes, and creates a one-time compressed backup of each original JSONL. It is safe to rerun; no X request is needed.
+
+`post_role` answers **主帖/评论**: `main` for standalone or quote posts, `comment` for replies, and `repost` for reposts. `post_type` gives the finer distinction `original` / `quote` / `reply` / `repost`. The decision comes from X's explicit relation IDs (`in_reply_to_id`, `quoted_post_id`, `reposted_post_id`), not from whether the post appeared on the Posts or Replies tab. A reply to your own post is still a reply.
+
+Account collection filters on the target author's ID. Pure reposts generally retain the original author's ID and are outside this authored-post corpus; a zero `repost` role count does not mean the account never reposted.
 
 Search **keyword + duration + specified user** directly from X. pyXcom reads that user's originals and replies and filters their text locally:
 

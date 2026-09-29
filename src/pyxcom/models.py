@@ -4,6 +4,21 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 
+def classify_post(
+    in_reply_to_id: str | None,
+    quoted_post_id: str | None,
+    reposted_post_id: str | None,
+) -> tuple[str, str]:
+    """Return (role, type) from X's explicit post relationships."""
+    if reposted_post_id:
+        return "repost", "repost"
+    if in_reply_to_id:
+        return "comment", "reply"
+    if quoted_post_id:
+        return "main", "quote"
+    return "main", "original"
+
+
 @dataclass(frozen=True)
 class Profile:
     id: str
@@ -31,6 +46,8 @@ class Post:
     created_at_utc: str
     text: str
     url: str
+    post_role: str = ""
+    post_type: str = ""
     language: str | None = None
     conversation_id: str | None = None
     in_reply_to_id: str | None = None
@@ -49,6 +66,13 @@ class Post:
     discovery_source: str | None = None
     discovery_url: str | None = None
     captured_at_utc: str | None = None
+
+    def __post_init__(self) -> None:
+        role, kind = classify_post(
+            self.in_reply_to_id, self.quoted_post_id, self.reposted_post_id
+        )
+        object.__setattr__(self, "post_role", role)
+        object.__setattr__(self, "post_type", kind)
 
     def to_dict(self) -> dict:
         return asdict(self)

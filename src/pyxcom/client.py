@@ -14,7 +14,7 @@ from .models import CollectionResult, Post, Profile
 from .parse import bottom_cursor, timeline_primary_posts
 from .search import MirrorSearch
 from .storage import PostStore
-from .transport import TWEET_FEATURES, XTransport
+from .transport import TWEET_FEATURES, XTransport, now_utc
 
 _HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 _POST_ID = re.compile(r"(?:/status/)?(\d{10,25})(?:\D.*)?$")
@@ -161,7 +161,7 @@ class XClient:
             )
             authored = [
                 post
-                for post in timeline_primary_posts(payload)
+                for post in timeline_primary_posts(payload, captured_at_utc=now_utc())
                 if post.author_id == profile.id
             ]
             for post in authored:
@@ -241,7 +241,7 @@ class XClient:
                 return store.finish(complete=False, reason="rate_limited")
             authored = [
                 post
-                for post in timeline_primary_posts(payload)
+                for post in timeline_primary_posts(payload, captured_at_utc=now_utc())
                 if post.author_id == profile.id
             ]
             filtered = [
