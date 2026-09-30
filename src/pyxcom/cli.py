@@ -8,6 +8,7 @@ from pathlib import Path
 from .client import XClient
 from .errors import PyXcomError
 from .schema import apply_role_schema, write_schema_report
+from .tables import export_tables
 from .validate import finalize_collection, validate_collection
 
 
@@ -107,6 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
     schema.add_argument(
         "--apply", action="store_true", help="Backfill role/type in saved CSV and JSONL"
     )
+    tables = commands.add_parser(
+        "export", help="Export saved records as users/posts/comments relational tables"
+    )
+    tables.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -124,6 +129,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "export":
+            print(json.dumps(export_tables(args.output), ensure_ascii=False))
+            return 0
         if args.command == "validate":
             validation = validate_collection(args.output)
             print(json.dumps(validation, ensure_ascii=False))
@@ -215,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))
-    except (PyXcomError, ValueError) as exc:
+    except (PyXcomError, ValueError, OSError) as exc:
         print(f"pyxcom: {exc}", file=sys.stderr)
         return 2
     return 0

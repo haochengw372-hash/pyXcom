@@ -115,9 +115,39 @@ with XClient(profile="Profile 3", proxy="http://127.0.0.1:7897") as client:
 
 `get_*` methods return `Profile`, `Post`, or a list of `Post` objects. `iter_user_posts` and `iter_search` stream records. `save_*` methods return a `CollectionResult` with count, page count, completion flag, and stop reason.
 
-## Output and resuming
+## Analysis tables (schema 1.0)
 
-Each collection directory contains:
+Every completed export/checkpoint now writes `tables/`. Use these tables for analysis:
+
+| File | Unit and key | Relationships |
+| --- | --- | --- |
+| `tables/users.csv` | One observed user, `user_id` | Referenced by `author_id` |
+| `tables/posts.csv` | One standalone original or quote post, `post_id` | `author_id`, optional `quoted_post_id` |
+| `tables/comments.csv` | One authored reply, `comment_id` | `author_id`, `root_post_id`, `parent_post_id`, `depth` |
+| `tables/manifest.json` | Schema version, counts, provenance and file hashes | Includes missing-parent/root coverage |
+
+Comments at **all observed depths** share one table. A direct reply to the root is depth 1; a reply to that comment is depth 2. The parent ID can refer to a row in either `posts.csv` or `comments.csv`. Unknown ancestry leaves depth empty; missing parents and roots are reported rather than invented. Replies to oneself remain comments. Quote posts remain in `posts.csv`; a reply containing a quote remains in `comments.csv` with its quote link.
+
+The three tables describe entities, while reply/quote relationships describe interaction. Likes, views, reposts and bookmarks are aggregate counters, not individual interaction records. If the source contains pure repost records, an additional `interactions.csv` preserves them; the current account collector does not establish a complete repost history or identify every reposter.
+
+Naming rules: plural English table names, snake_case columns, explicit `user_id` / `post_id` / `comment_id`, `username` / `display_name` for users, UTC timestamp suffix `_at_utc`, and count suffix `_count`. IDs are strings: import ID columns as text in spreadsheets. CSVs use UTF-8 with BOM; list values are JSON arrays and unavailable scalar values are empty. Users without saved profile details are represented by observed ID/username with `profile_available=false`; a zero count is never substituted for an unknown count.
+
+Convert an existing collection without logging in or making network requests:
+
+```bash
+pyxcom export --output output/ai-accounts-year
+```
+
+```python
+from pyxcom import export_tables
+manifest = export_tables("output/ai-accounts-year")
+```
+
+**Coverage:** exporting a reply table does not fetch a comment tree. Existing account collections contain replies authored by the selected accounts. The schema supports main posts and multiple comment levels, but this release does not add recursive acquisition of other users' comments. Missing relationships remain visible in the export.
+
+## Collection files and resuming
+
+The existing files remain the compatibility/resume layer. In particular, the root `posts.csv` is the legacy mixed export; use `tables/posts.csv` for main posts only. Each collection directory contains:
 
 - `posts.jsonl`: one public post per line, with text, UTC timestamp, link, author, reply/quote relations, views, likes, reposts, replies, quotes, bookmarks, media URLs, hashtags, and mentions.
 - `posts.csv`: the same deduplicated records, sorted by time. List fields are JSON arrays.

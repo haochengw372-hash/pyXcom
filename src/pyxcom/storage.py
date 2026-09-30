@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .models import CollectionResult, Post
 from .transport import now_utc
+from .tables import export_tables
 
 
 def _atomic_json(path: Path, value: dict) -> None:
@@ -116,6 +117,7 @@ class PostStore:
             },
         }
         _atomic_json(self.output_dir / "manifest.json", manifest)
+        export_tables(self.output_dir)
         return CollectionResult(
             output_dir=self.output_dir,
             post_count=len(rows),

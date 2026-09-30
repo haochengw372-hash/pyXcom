@@ -8,6 +8,7 @@ from pathlib import Path
 from .models import CollectionResult
 from .storage import PostStore, _atomic_json
 from .transport import now_utc
+from .validate_tables import validate_tables
 
 
 def finalize_collection(output_dir: str | Path) -> CollectionResult:
@@ -90,6 +91,8 @@ def validate_collection(output_dir: str | Path) -> dict:
         )
         if len(account_manifest["accounts"]) != len(profiles):
             errors.append("account_manifest_mismatch")
+    if (output / "tables").exists():
+        errors.extend(validate_tables(output)["errors"])
     return {
         "output_dir": str(output),
         "valid": not errors,

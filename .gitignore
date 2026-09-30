@@ -9,3 +9,6 @@ output/
 data/
 *.cookies.json
 .env
+
+.omx/
+.mypy_cache/
