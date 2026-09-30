@@ -26,4 +26,4 @@ __all__ = [
     "finalize_collection",
     "validate_collection",
 ]
-__version__ = "0.6.0"
+__version__ = "0.6.1"

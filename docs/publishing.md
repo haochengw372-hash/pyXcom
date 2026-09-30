@@ -36,14 +36,14 @@ production releases.
    `twine check`, installs the wheel into a clean virtual environment, runs the
    unit tests, and checks the CLI. The separate publish job downloads those exact
    artifacts and uploads them with an OIDC identity.
-4. Install the TestPyPI release in a new environment. For version `0.6.0`:
+4. Install the TestPyPI release in a new environment. For version `0.6.1`:
 
    ```bash
    python3 -m venv /tmp/pyxcom-testpypi-060
    /tmp/pyxcom-testpypi-060/bin/python -m pip install \
      'browser-cookie3>=0.19,<1' 'beautifulsoup4>=4.12,<5' 'httpx>=0.27,<1'
    /tmp/pyxcom-testpypi-060/bin/python -m pip install \
-     --index-url https://test.pypi.org/simple/ --no-deps 'pyXcom==0.6.0'
+     --index-url https://test.pypi.org/simple/ --no-deps 'pyXcom==0.6.1'
    /tmp/pyxcom-testpypi-060/bin/python -m pip check
    /tmp/pyxcom-testpypi-060/bin/python -c \
      'from importlib.metadata import version; from pyxcom import XClient; print(version("pyXcom"))'
@@ -66,7 +66,7 @@ environment:
 
 ```bash
 python3 -m venv /tmp/pyxcom-pypi-060
-/tmp/pyxcom-pypi-060/bin/python -m pip install --index-url https://pypi.org/simple/ 'pyXcom==0.6.0'
+/tmp/pyxcom-pypi-060/bin/python -m pip install --index-url https://pypi.org/simple/ 'pyXcom==0.6.1'
 /tmp/pyxcom-pypi-060/bin/python -m pip check
 /tmp/pyxcom-pypi-060/bin/python -c 'from importlib.metadata import version; from pyxcom import XClient; print(version("pyXcom"))'
 /tmp/pyxcom-pypi-060/bin/pyxcom --help

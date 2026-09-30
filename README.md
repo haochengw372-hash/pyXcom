@@ -74,7 +74,7 @@ Methods belong to `XClient`. Every method lists its accepted parameters explicit
 - Parameters: `handle` for one account, `handles` for several, `keyword` for search, `output_dir` for saved datasets, and `since`/`until` for dates. Options are keyword-only.
 - Dates are UTC: `since` inclusive, `until` exclusive. `max_pages` and `limit` must be positive integers or `None`. Saved timeline/mirror `limit` is a page-boundary stopping threshold, so a final page can exceed it; iterator limits are exact.
 
-See [API reference](docs/api.md) for signatures, return types and compatibility names.
+See [API reference](https://github.com/haochengw372-hash/pyXcom/blob/main/docs/api.md) for signatures, return types and compatibility names.
 
 ### Search one account
 
@@ -208,17 +208,17 @@ X endpoints may change or impose limits. pyXcom discovers current GraphQL query 
 
 ## License
 
-pyXcom is released under the [MIT License](LICENSE). Copyright © 2026 Haocheng Wang.
+pyXcom is released under the [MIT License](https://github.com/haochengw372-hash/pyXcom/blob/main/LICENSE). Copyright © 2026 Haocheng Wang.
 
 ## Citation
 
 **Author:** Haocheng Wang, Communication University of China.
 
-If you use pyXcom in a paper, thesis, dataset, or other research output, please cite the software and report the version used. GitHub's **Cite this repository** menu reads the machine-readable [CITATION.cff](CITATION.cff).
+If you use pyXcom in a paper, thesis, dataset, or other research output, please cite the software and report the version used. GitHub's **Cite this repository** menu reads the machine-readable [CITATION.cff](https://github.com/haochengw372-hash/pyXcom/blob/main/CITATION.cff).
 
 **Suggested reference**
 
-Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 0.6.0) [Computer software]. https://github.com/haochengw372-hash/pyXcom
+Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 0.6.1) [Computer software]. https://github.com/haochengw372-hash/pyXcom
 
 **BibTeX**
 
@@ -227,7 +227,7 @@ Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communi
   author  = {Wang, Haocheng},
   title   = {{pyXcom}: Structured and Auditable X Data Collection for Communication Research},
   year    = {2026},
-  version = {0.6.0},
+  version = {0.6.1},
   url     = {https://github.com/haochengw372-hash/pyXcom}
 }
 ```
