@@ -8,7 +8,7 @@ from pathlib import Path
 
 def validate_tables(output_dir: str | Path) -> dict:
     output = Path(output_dir).expanduser()
-    tables = output / "tables"
+    tables = output if (output / "comments.csv").exists() else output / "tables"
     errors: list[str] = []
     try:
         manifest = json.loads((tables / "manifest.json").read_text(encoding="utf-8"))

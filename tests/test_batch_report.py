@@ -30,7 +30,7 @@ class BatchReportTests(unittest.TestCase):
                 "replies": {"count": 0, "reason": "empty_timeline_end"},
             }
             _write_batch_report(output, [account], result)
-            report = (output / "report.md").read_text()
+            report = (output / ".pyxcom" / "report.md").read_text()
             self.assertIn("@sample", report)
             self.assertIn("主帖", report)
             self.assertIn("2026-09", report)

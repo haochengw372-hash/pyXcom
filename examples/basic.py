@@ -11,10 +11,10 @@ with XClient(
 ) as client:
     profile = client.get_user("thsottiaux")
     print(profile.name, profile.followers_count)
-    result = client.save_search(
+    result = client.save_search_posts(
         "Codex",
         "output/example-search",
-        user="thsottiaux",
+        handle="thsottiaux",
         since="2026-09-01",
         until="2026-09-30",
         max_pages=1,

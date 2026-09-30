@@ -1,6 +1,7 @@
 """pyXcom: public X collection with an existing Chrome or Edge login."""
 
 from .client import XClient
+from .errors import APIError, AuthenticationError, PyXcomError, RateLimitError
 from .models import CollectionResult, Post, Profile, classify_post
 from .schema import apply_role_schema, schema_summary, write_schema_report
 from .tables import export_tables
@@ -9,6 +10,10 @@ from .validate import finalize_collection, validate_collection
 
 __all__ = [
     "XClient",
+    "PyXcomError",
+    "AuthenticationError",
+    "APIError",
+    "RateLimitError",
     "export_tables",
     "validate_tables",
     "Profile",
@@ -21,4 +26,4 @@ __all__ = [
     "finalize_collection",
     "validate_collection",
 ]
-__version__ = "0.4.0"
+__version__ = "0.5.0"

@@ -57,12 +57,12 @@ class SearchStorageTests(unittest.TestCase):
             summary = resumed.finish(complete=True, reason="source_end")
             self.assertEqual(summary.post_count, 1)
             self.assertEqual(
-                len((folder / "posts.jsonl").read_text().split("\n")) - 1, 1
+                len((folder / ".pyxcom" / "posts.jsonl").read_text().split("\n")) - 1, 1
             )
             with (folder / "posts.csv").open(encoding="utf-8-sig") as file:
                 self.assertEqual(len(list(csv.DictReader(file))), 1)
             manifest = json.loads((folder / "manifest.json").read_text())
-            self.assertEqual(manifest["post_count"], 1)
+            self.assertEqual(manifest["counts"]["source_records"], 1)
             self.assertEqual(len(manifest["sha256"]["posts.csv"]), 64)
 
     def test_reads_existing_jsonl_with_unicode_line_separator(self):

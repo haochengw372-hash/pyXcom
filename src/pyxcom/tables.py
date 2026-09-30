@@ -8,6 +8,7 @@ from dataclasses import fields
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from .layout import migrate_collection, source_path
 from .models import Post, Profile
 
 _CONTENT = [
@@ -132,9 +133,10 @@ def _depths(records: dict[str, Post]) -> dict[str, tuple[int | None, str]]:
 
 
 def export_tables(output_dir: str | Path) -> dict:
-    """Write normalized CSV views below ``tables/`` without altering source files."""
+    """Write public relational CSV tables at the collection root."""
     directory = Path(output_dir).expanduser()
-    source = directory / "posts.jsonl"
+    migrate_collection(directory)
+    source = source_path(directory, "posts.jsonl")
     records: dict[str, Post] = {}
     for line in source.read_text(encoding="utf-8").split("\n"):
         if not line.strip():
@@ -157,7 +159,7 @@ def export_tables(output_dir: str | Path) -> dict:
             raise ValueError(f"Conflicting duplicate post ID: {post.id}")
         records[post.id] = post
     depths = _depths(records)
-    profiles_path = directory / "profiles.json"
+    profiles_path = source_path(directory, "profiles.json")
     profiles: dict[str, dict] = {}
     if profiles_path.exists():
         raw = json.loads(profiles_path.read_text(encoding="utf-8"))
@@ -227,7 +229,7 @@ def export_tables(output_dir: str | Path) -> dict:
                     **payload,
                 }
             )
-    target = directory / "tables"
+    target = directory
     target.mkdir(exist_ok=True)
     tables = {
         "users.csv": (_USER, list(users.values())),
@@ -241,12 +243,13 @@ def export_tables(output_dir: str | Path) -> dict:
     if not interactions:
         (target / "interactions.csv").unlink(missing_ok=True)
     manifest = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
+        "layout_version": "2.0",
         "source_kind": "saved_post_observations",
         "source_sha256": {
-            "posts.jsonl": _hash(source),
+            str(source.relative_to(directory)): _hash(source),
             **(
-                {"profiles.json": _hash(profiles_path)}
+                {str(profiles_path.relative_to(directory)): _hash(profiles_path)}
                 if profiles_path.exists()
                 else {}
             ),
@@ -264,6 +267,21 @@ def export_tables(output_dir: str | Path) -> dict:
         "conversation_coverage": "observed_records_only",
         "sha256": {name: _hash(target / name) for name in tables},
     }
+    collection_path = source_path(directory, "manifest.json")
+    if collection_path.exists() and collection_path != target / "manifest.json":
+        collection = json.loads(collection_path.read_text(encoding="utf-8"))
+        for key in (
+            "query",
+            "pages_fetched",
+            "complete",
+            "reason",
+            "captured_at_utc",
+            "oldest_post_utc",
+            "newest_post_utc",
+            "missing_ids",
+        ):
+            if key in collection:
+                manifest[key] = collection[key]
     with NamedTemporaryFile("w", encoding="utf-8", dir=target, delete=False) as stream:
         temporary = Path(stream.name)
         json.dump(manifest, stream, ensure_ascii=False, indent=2)

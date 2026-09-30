@@ -6,14 +6,15 @@ import time
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from .auth import load_x_cookies
 from .errors import APIError, RateLimitError
+from .layout import child_dir, migrate_collection, source_path
 from .models import CollectionResult, Post, Profile
 from .parse import bottom_cursor, timeline_primary_posts
 from .search import MirrorSearch
-from .storage import PostStore
+from .storage import PostStore, _atomic_json
 from .transport import TWEET_FEATURES, XTransport, now_utc
 
 _HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
@@ -45,6 +46,14 @@ def _post_id(value: str) -> str:
     if not match:
         raise ValueError("Expected a numeric post ID or an X post URL")
     return match.group(1)
+
+
+def _page_options(max_pages: int | None, limit: int | None) -> None:
+    for name, value in (("max_pages", max_pages), ("limit", limit)):
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+        ):
+            raise ValueError(f"{name} must be a positive integer or None")
 
 
 def _within(post: Post, since: str | None, until: str | None) -> bool:
@@ -142,6 +151,9 @@ class XClient:
         max_pages: int | None = None,
         limit: int | None = None,
     ) -> Iterator[Post]:
+        _page_options(max_pages, limit)
+        if timeline not in {"posts", "replies"}:
+            raise ValueError("timeline must be posts or replies")
         since, until = _dates(since, until)
         profile = self.get_user(handle)
         cursor = None
@@ -165,6 +177,8 @@ class XClient:
                 if post.author_id == profile.id
             ]
             for post in authored:
+                if post.post_role != ("comment" if timeline == "replies" else "main"):
+                    continue
                 if post.id in seen_ids or not _within(post, since, until):
                     continue
                 seen_ids.add(post.id)
@@ -196,8 +210,27 @@ class XClient:
                 return
             time.sleep(self.delay)
 
-    def get_user_posts(self, handle: str, **kwargs) -> list[Post]:
-        return list(self.iter_user_posts(handle, **kwargs))
+    def get_user_posts(
+        self,
+        handle: str,
+        *,
+        timeline: str = "posts",
+        since: str | None = None,
+        until: str | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+    ) -> list[Post]:
+        """Return authored timeline records; prefer get_user_replies for replies."""
+        return list(
+            self.iter_user_posts(
+                handle,
+                timeline=timeline,
+                since=since,
+                until=until,
+                max_pages=max_pages,
+                limit=limit,
+            )
+        )
 
     def save_user_posts(
         self,
@@ -210,6 +243,9 @@ class XClient:
         max_pages: int | None = None,
         limit: int | None = None,
     ) -> CollectionResult:
+        _page_options(max_pages, limit)
+        if timeline not in {"posts", "replies"}:
+            raise ValueError("timeline must be posts or replies")
         since, until = _dates(since, until)
         profile = self.get_user(handle)
         query = {
@@ -220,6 +256,12 @@ class XClient:
             "until": until,
         }
         store = PostStore(output_dir, query=query)
+        store.retain_role("comment" if timeline == "replies" else "main")
+        if query["kind"] == "user_timeline":
+            _atomic_json(
+                source_path(output_dir, "profiles.json"),
+                {profile.handle: profile.to_dict()},
+            )
         if store.complete:
             return store.finish(complete=True, reason=store.state["reason"])
         cursor = store.cursor
@@ -252,6 +294,7 @@ class XClient:
                 )
                 for post in authored
                 if _within(post, since, until)
+                and post.post_role == ("comment" if timeline == "replies" else "main")
             ]
             next_cursor = bottom_cursor(payload)
             store.state.pop("rate_reset_at", None)
@@ -291,9 +334,10 @@ class XClient:
         """Collect originals and authored replies into one deduplicated table."""
         since, until = _dates(since, until)
         output = Path(output_dir)
+        migrate_collection(output)
         original = self.save_user_posts(
             handle,
-            output / "originals",
+            child_dir(output, "originals"),
             timeline="posts",
             since=since,
             until=until,
@@ -301,7 +345,7 @@ class XClient:
         )
         replies = self.save_user_posts(
             handle,
-            output / "replies",
+            child_dir(output, "replies"),
             timeline="replies",
             since=since,
             until=until,
@@ -316,11 +360,19 @@ class XClient:
                 "until": until,
             },
         )
+        profile = self.get_user(handle)
+        _atomic_json(
+            source_path(output, "profiles.json"), {profile.handle: profile.to_dict()}
+        )
         if store.complete and original.complete and replies.complete:
             return store.finish(complete=True, reason="both_timelines_complete")
         combined: dict[str, Post] = {}
-        for child in (output / "originals", output / "replies"):
-            for line in (child / "posts.jsonl").read_text(encoding="utf-8").split("\n"):
+        for child in (child_dir(output, "originals"), child_dir(output, "replies")):
+            for line in (
+                source_path(child, "posts.jsonl")
+                .read_text(encoding="utf-8")
+                .split("\n")
+            ):
                 if line.strip():
                     post = Post(**json.loads(line))
                     combined[post.id] = post
@@ -343,6 +395,7 @@ class XClient:
         max_pages: int | None = None,
         limit: int | None = None,
     ) -> Iterator[Post]:
+        _page_options(max_pages, limit)
         since, until = _dates(since, until)
         user = _handle(user) if user else None
         if not keyword.strip():
@@ -405,8 +458,27 @@ class XClient:
                 return
             time.sleep(self.delay)
 
-    def get_search(self, keyword: str, **kwargs) -> list[Post]:
-        return list(self.iter_search(keyword, **kwargs))
+    def get_search(
+        self,
+        keyword: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        user: str | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+    ) -> list[Post]:
+        """Compatibility name for get_search_posts; user is the legacy handle option."""
+        return list(
+            self.iter_search(
+                keyword,
+                since=since,
+                until=until,
+                user=user,
+                max_pages=max_pages,
+                limit=limit,
+            )
+        )
 
     def save_search(
         self,
@@ -419,6 +491,7 @@ class XClient:
         max_pages: int | None = None,
         limit: int | None = None,
     ) -> CollectionResult:
+        _page_options(max_pages, limit)
         since, until = _dates(since, until)
         user = _handle(user) if user else None
         if not keyword.strip():
@@ -501,9 +574,10 @@ class XClient:
         limit: int | None,
     ) -> CollectionResult:
         output = Path(output_dir)
+        migrate_collection(output)
         activity = self.save_user_activity(
             user,
-            output / "source",
+            child_dir(output, "source"),
             since=since,
             until=until,
             max_pages=max_pages,
@@ -518,12 +592,18 @@ class XClient:
                 "until": until,
             },
         )
+        profile = self.get_user(user)
+        _atomic_json(
+            source_path(output, "profiles.json"), {profile.handle: profile.to_dict()}
+        )
         if store.complete and activity.complete:
             return store.finish(complete=True, reason="both_timelines_complete")
         matches: list[Post] = []
         needle = keyword.casefold()
         for line in (
-            (output / "source" / "posts.jsonl").read_text(encoding="utf-8").split("\n")
+            source_path(child_dir(output, "source"), "posts.jsonl")
+            .read_text(encoding="utf-8")
+            .split("\n")
         ):
             if line.strip():
                 post = Post(**json.loads(line))
@@ -549,7 +629,7 @@ class XClient:
         pages_per_round: int = 5,
         rounds: int = 1,
         wait_on_rate_limit: bool = False,
-        progress=None,
+        progress: Callable[[dict], None] | None = None,
     ) -> CollectionResult:
         """Collect several verified X accounts with resumable round-robin paging."""
         from .batch import collect_accounts
@@ -564,6 +644,150 @@ class XClient:
             output_dir,
             since=normalized_since,
             until=normalized_until,
+            pages_per_round=pages_per_round,
+            rounds=rounds,
+            wait_on_rate_limit=wait_on_rate_limit,
+            progress=progress,
+        )
+
+    def iter_user_replies(
+        self,
+        handle: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+    ) -> Iterator[Post]:
+        """Stream replies authored by this account, not replies received by it."""
+        return self.iter_user_posts(
+            handle,
+            timeline="replies",
+            since=since,
+            until=until,
+            max_pages=max_pages,
+            limit=limit,
+        )
+
+    def get_user_replies(
+        self,
+        handle: str,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+    ) -> list[Post]:
+        """Return replies authored by this account in memory."""
+        return list(
+            self.iter_user_replies(
+                handle, since=since, until=until, max_pages=max_pages, limit=limit
+            )
+        )
+
+    def save_user_replies(
+        self,
+        handle: str,
+        output_dir: str | Path,
+        *,
+        since: str | None = None,
+        until: str | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+    ) -> CollectionResult:
+        """Save this account's reply timeline to the standard dataset layout."""
+        return self.save_user_posts(
+            handle,
+            output_dir,
+            timeline="replies",
+            since=since,
+            until=until,
+            max_pages=max_pages,
+            limit=limit,
+        )
+
+    def iter_search_posts(
+        self,
+        keyword: str,
+        *,
+        handle: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+    ) -> Iterator[Post]:
+        """Stream matched posts/replies; handle selects direct account search."""
+        return self.iter_search(
+            keyword,
+            user=handle,
+            since=since,
+            until=until,
+            max_pages=max_pages,
+            limit=limit,
+        )
+
+    def get_search_posts(
+        self,
+        keyword: str,
+        *,
+        handle: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+    ) -> list[Post]:
+        """Return search matches in memory using the same options as iter/save."""
+        return list(
+            self.iter_search_posts(
+                keyword,
+                handle=handle,
+                since=since,
+                until=until,
+                max_pages=max_pages,
+                limit=limit,
+            )
+        )
+
+    def save_search_posts(
+        self,
+        keyword: str,
+        output_dir: str | Path,
+        *,
+        handle: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        max_pages: int | None = None,
+        limit: int | None = None,
+    ) -> CollectionResult:
+        """Save search matches and resumable source streams."""
+        return self.save_search(
+            keyword,
+            output_dir,
+            user=handle,
+            since=since,
+            until=until,
+            max_pages=max_pages,
+            limit=limit,
+        )
+
+    def save_users_activity(
+        self,
+        handles: list[str],
+        output_dir: str | Path,
+        *,
+        since: str,
+        until: str,
+        pages_per_round: int = 5,
+        rounds: int = 1,
+        wait_on_rate_limit: bool = False,
+        progress: Callable[[dict], None] | None = None,
+    ) -> CollectionResult:
+        """Save multiple accounts' authored main posts and replies with checkpoints."""
+        return self.save_accounts(
+            handles,
+            output_dir,
+            since=since,
+            until=until,
             pages_per_round=pages_per_round,
             rounds=rounds,
             wait_on_rate_limit=wait_on_rate_limit,

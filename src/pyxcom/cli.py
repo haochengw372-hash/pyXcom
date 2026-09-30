@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .client import XClient
+from .layout import internal_dir
 from .errors import PyXcomError
 from .schema import apply_role_schema, write_schema_report
 from .tables import export_tables
@@ -37,8 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     common = _common_parser()
     profile = commands.add_parser(
-        "profile", parents=[common], help="Get public user profile"
+        "user", aliases=["profile"], parents=[common], help="Get public user profile"
     )
+    profile.set_defaults(command="profile")
     profile.add_argument("handle")
     profile.add_argument("--output", type=Path)
     post = commands.add_parser("post", parents=[common], help="Get one public post")
@@ -50,40 +52,60 @@ def build_parser() -> argparse.ArgumentParser:
     raw.add_argument("post_id_or_url")
     raw.add_argument("--output", type=Path)
     posts = commands.add_parser(
-        "posts", parents=[common], help="Save a user's timeline"
+        "user-posts",
+        aliases=["posts"],
+        parents=[common],
+        help="Save authored main posts",
     )
+    posts.set_defaults(command="posts")
     posts.add_argument("handle")
     posts.add_argument("--timeline", choices=("posts", "replies"), default="posts")
     posts.add_argument("--since", help="Inclusive UTC date YYYY-MM-DD")
     posts.add_argument("--until", help="Exclusive UTC date YYYY-MM-DD")
     posts.add_argument("--max-pages", type=int)
     posts.add_argument("--limit", type=int)
-    posts.add_argument("--output", type=Path, required=True)
-    activity = commands.add_parser(
-        "activity", parents=[common], help="Save posts and replies"
+    posts.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
     )
+    activity = commands.add_parser(
+        "user-activity",
+        aliases=["activity"],
+        parents=[common],
+        help="Save posts and authored replies",
+    )
+    activity.set_defaults(command="activity")
     activity.add_argument("handle")
     activity.add_argument("--since")
     activity.add_argument("--until")
     activity.add_argument("--max-pages", type=int)
-    activity.add_argument("--output", type=Path, required=True)
+    activity.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
     search = commands.add_parser(
-        "search", parents=[common], help="Search keyword, dates, and user"
+        "search-posts",
+        aliases=["search"],
+        parents=[common],
+        help="Search keyword, dates, and user",
     )
+    search.set_defaults(command="search")
+    search.add_argument("keyword", help="Literal word or phrase for direct user search")
     search.add_argument(
-        "keyword", help="Keyword(s); quote a phrase using X search syntax"
+        "--handle", "--user", dest="user", help="Author handle for direct X search"
     )
-    search.add_argument("--user", help="Optional author handle")
     search.add_argument("--since", help="Inclusive UTC date YYYY-MM-DD")
     search.add_argument("--until", help="Exclusive UTC date YYYY-MM-DD")
     search.add_argument("--max-pages", type=int)
     search.add_argument("--limit", type=int)
-    search.add_argument("--output", type=Path, required=True)
+    search.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
     batch = commands.add_parser(
-        "batch",
+        "users-activity",
+        aliases=["batch"],
         parents=[common],
         help="Collect several accounts and write a combined report",
     )
+    batch.set_defaults(command="batch")
     batch.add_argument("--handles", nargs="+", required=True)
     batch.add_argument("--since", required=True)
     batch.add_argument("--until", required=True)
@@ -92,26 +114,48 @@ def build_parser() -> argparse.ArgumentParser:
         "--rounds", type=int, default=1, help="0 keeps resuming until complete"
     )
     batch.add_argument("--wait-on-rate-limit", action="store_true")
-    batch.add_argument("--output", type=Path, required=True)
+    batch.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
     validate = commands.add_parser(
         "validate", help="Check saved rows, scope, and SHA-256 hashes"
     )
-    validate.add_argument("--output", type=Path, required=True)
+    validate.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
     finalize = commands.add_parser(
         "finalize", help="Rebuild CSV and report after an interrupted run"
     )
-    finalize.add_argument("--output", type=Path, required=True)
+    finalize.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
     schema = commands.add_parser(
         "schema", help="Report field coverage and optionally add main/comment columns"
     )
-    schema.add_argument("--output", type=Path, required=True)
+    schema.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
     schema.add_argument(
         "--apply", action="store_true", help="Backfill role/type in saved CSV and JSONL"
     )
     tables = commands.add_parser(
         "export", help="Export saved records as users/posts/comments relational tables"
     )
-    tables.add_argument("--output", type=Path, required=True)
+    tables.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
+    replies = commands.add_parser(
+        "user-replies", parents=[common], help="Save replies authored by an account"
+    )
+    replies.set_defaults(command="posts", timeline="replies", limit=None)
+    replies.add_argument("handle")
+    replies.add_argument("--since")
+    replies.add_argument("--until")
+    replies.add_argument("--max-pages", type=int)
+    replies.add_argument("--limit", type=int)
+    replies.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
     return parser
 
 
@@ -153,7 +197,9 @@ def main(argv: list[str] | None = None) -> int:
                         "post_field_count": summary["post_field_count"],
                         "role_counts": summary["role_counts"],
                         "type_counts": summary["type_counts"],
-                        "schema_report": str(args.output / "schema_report.md"),
+                        "schema_report": str(
+                            internal_dir(args.output) / "schema_report.md"
+                        ),
                         "changed_directories": len(
                             summary.get("changed_directories", [])
                         ),
@@ -199,10 +245,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))
             elif args.command == "search":
-                result = client.save_search(
+                result = client.save_search_posts(
                     args.keyword,
                     args.output,
-                    user=args.user,
+                    handle=args.user,
                     since=args.since,
                     until=args.until,
                     max_pages=args.max_pages,
@@ -210,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))
             elif args.command == "batch":
-                result = client.save_accounts(
+                result = client.save_users_activity(
                     args.handles,
                     args.output,
                     since=args.since,

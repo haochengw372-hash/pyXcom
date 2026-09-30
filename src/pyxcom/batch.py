@@ -8,6 +8,7 @@ from statistics import median
 from typing import TYPE_CHECKING, Callable
 
 from .errors import PyXcomError
+from .layout import child_dir, internal_dir, migrate_collection, source_path
 from .models import CollectionResult, Post, Profile
 from .storage import PostStore, _atomic_json
 from .transport import now_utc
@@ -31,12 +32,16 @@ def _posts(path: Path) -> list[Post]:
 
 
 def _account_status(output: Path, handle: str, profile: dict) -> dict:
-    account_dir = output / handle
-    originals = _state(account_dir / "originals" / "state.json")
-    replies = _state(account_dir / "replies" / "state.json")
-    original_count = len(_posts(account_dir / "originals" / "posts.jsonl"))
-    reply_count = len(_posts(account_dir / "replies" / "posts.jsonl"))
-    total = len({post.id for post in _posts(account_dir / "posts.jsonl")})
+    account_dir = child_dir(output, handle)
+    originals = _state(source_path(child_dir(account_dir, "originals"), "state.json"))
+    replies = _state(source_path(child_dir(account_dir, "replies"), "state.json"))
+    original_count = len(
+        _posts(source_path(child_dir(account_dir, "originals"), "posts.jsonl"))
+    )
+    reply_count = len(
+        _posts(source_path(child_dir(account_dir, "replies"), "posts.jsonl"))
+    )
+    total = len({post.id for post in _posts(source_path(account_dir, "posts.jsonl"))})
     return {
         "handle": handle,
         "user_id": profile["id"],
@@ -62,7 +67,7 @@ def _account_status(output: Path, handle: str, profile: dict) -> dict:
 def _write_batch_report(
     output: Path, accounts: list[dict], result: CollectionResult
 ) -> None:
-    posts = _posts(output / "posts.jsonl")
+    posts = _posts(source_path(output, "posts.jsonl"))
     by_author = Counter(post.author_id for post in posts)
     role_counts = Counter((post.author_id, post.post_role) for post in posts)
     month_counts = Counter((post.author_id, post.created_at_utc[:7]) for post in posts)
@@ -122,7 +127,7 @@ def _write_batch_report(
         "删除、受保护、地区限制或未索引的帖子无法据此恢复。互动数是抓取时快照。原始 JSONL、CSV、账号资料、各账号游标及 SHA-256 哈希与本报告一同保存；登录 cookie 不写入输出。",
         "",
     ]
-    (output / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    (internal_dir(output) / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def collect_accounts(
@@ -143,8 +148,8 @@ def collect_accounts(
     if not handles:
         raise ValueError("At least one account is required")
     output = Path(output_dir).expanduser()
-    output.mkdir(parents=True, exist_ok=True)
-    saved_profiles = output / "profiles.json"
+    migrate_collection(output)
+    saved_profiles = source_path(output, "profiles.json")
     if saved_profiles.exists():
         for handle, record in json.loads(
             saved_profiles.read_text(encoding="utf-8")
@@ -155,7 +160,7 @@ def collect_accounts(
         for handle in handles
     }
     canonical = list(dict.fromkeys(profiles))
-    _atomic_json(output / "profiles.json", profiles)
+    _atomic_json(internal_dir(output) / "profiles.json", profiles)
     query = {
         "kind": "account_batch",
         "handles": canonical,
@@ -173,7 +178,9 @@ def collect_accounts(
     reason = "round_limit"
     while rounds == 0 or completed_rounds < rounds:
         before = sum(
-            _state(output / h / kind / "state.json").get("pages_fetched", 0)
+            _state(
+                source_path(child_dir(child_dir(output, h), kind), "state.json")
+            ).get("pages_fetched", 0)
             for h in canonical
             for kind in ("originals", "replies")
         )
@@ -181,7 +188,7 @@ def collect_accounts(
             try:
                 client.save_user_activity(
                     handle,
-                    output / handle,
+                    child_dir(output, handle),
                     since=since,
                     until=until,
                     max_pages=pages_per_round,
@@ -205,7 +212,7 @@ def collect_accounts(
         accounts = [_account_status(output, h, profiles[h]) for h in canonical]
         collected: dict[str, Post] = {}
         for handle in canonical:
-            for post in _posts(output / handle / "posts.jsonl"):
+            for post in _posts(source_path(child_dir(output, handle), "posts.jsonl")):
                 collected[post.id] = post
         store.append_page(list(collected.values()), None)
         store.state["pages_fetched"] = sum(
@@ -215,7 +222,7 @@ def collect_accounts(
         )
         completed_rounds += 1
         _atomic_json(
-            output / "account_manifest.json",
+            internal_dir(output) / "account_manifest.json",
             {"query": query, "accounts": accounts, "updated_at_utc": now_utc()},
         )
         checkpoint = store.finish(complete=False, reason="in_progress")

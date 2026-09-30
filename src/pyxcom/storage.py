@@ -1,12 +1,14 @@
 """Resumable public-post exports with auditable state and hashes."""
 
 import csv
+import gzip
 import hashlib
 import json
 import os
 from dataclasses import fields
 from pathlib import Path
 
+from .layout import internal_dir, migrate_collection
 from .models import CollectionResult, Post
 from .transport import now_utc
 from .tables import export_tables
@@ -23,9 +25,10 @@ def _atomic_json(path: Path, value: dict) -> None:
 class PostStore:
     def __init__(self, output_dir: str | Path, *, query: dict) -> None:
         self.output_dir = Path(output_dir).expanduser()
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._jsonl = self.output_dir / "posts.jsonl"
-        self._state_path = self.output_dir / "state.json"
+        migrate_collection(self.output_dir)
+        self._internal = internal_dir(self.output_dir)
+        self._jsonl = self._internal / "posts.jsonl"
+        self._state_path = self._internal / "state.json"
         if self._state_path.exists():
             self.state = json.loads(self._state_path.read_text(encoding="utf-8"))
             if self.state.get("query") != query:
@@ -77,6 +80,26 @@ class PostStore:
         _atomic_json(self._state_path, self.state)
         return added
 
+    def retain_role(self, role: str) -> None:
+        """Normalize a source timeline while preserving its original observations."""
+        kept = {
+            key: post for key, post in self._posts.items() if post.post_role == role
+        }
+        if len(kept) == len(self._posts):
+            return
+        backup = self._internal / "posts.before-timeline-filter.jsonl.gz"
+        if not backup.exists():
+            with gzip.open(backup, "wb") as stream:
+                stream.write(self._jsonl.read_bytes())
+        temporary = self._jsonl.with_suffix(".jsonl.tmp")
+        with temporary.open("w", encoding="utf-8") as stream:
+            for post in kept.values():
+                stream.write(json.dumps(post.to_dict(), ensure_ascii=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, self._jsonl)
+        self._posts = kept
+
     def add_missing_ids(self, ids: set[str]) -> None:
         self.state["missing_ids"] = sorted(
             set(self.state.get("missing_ids", [])) | ids,
@@ -88,7 +111,7 @@ class PostStore:
         self.state.update(complete=complete, reason=reason, updated_at_utc=now_utc())
         _atomic_json(self._state_path, self.state)
         self._jsonl.touch(exist_ok=True)
-        csv_path = self.output_dir / "posts.csv"
+        csv_path = self._internal / "posts.csv"
         rows = sorted(
             self._posts.values(), key=lambda post: (post.created_at_utc, post.id)
         )
@@ -116,7 +139,7 @@ class PostStore:
                 "posts.csv": hashlib.sha256(csv_path.read_bytes()).hexdigest(),
             },
         }
-        _atomic_json(self.output_dir / "manifest.json", manifest)
+        _atomic_json(self._internal / "manifest.json", manifest)
         export_tables(self.output_dir)
         return CollectionResult(
             output_dir=self.output_dir,

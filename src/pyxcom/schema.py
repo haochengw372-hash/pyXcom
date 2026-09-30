@@ -7,6 +7,7 @@ from collections import Counter
 from dataclasses import fields
 from pathlib import Path
 
+from .layout import internal_dir, migrate_collection, source_path
 from .models import Post, Profile
 from .storage import PostStore, _atomic_json
 from .validate import finalize_collection, validate_collection
@@ -68,7 +69,7 @@ def _read_posts(path: Path) -> list[Post]:
 
 def schema_summary(output_dir: str | Path) -> dict:
     output = Path(output_dir).expanduser()
-    posts = _read_posts(output / "posts.jsonl")
+    posts = _read_posts(source_path(output, "posts.jsonl"))
     post_fields = []
     for item in fields(Post):
         values = [getattr(post, item.name) for post in posts]
@@ -90,7 +91,7 @@ def schema_summary(output_dir: str | Path) -> dict:
                 ),
             }
         )
-    profiles_path = output / "profiles.json"
+    profiles_path = source_path(output, "profiles.json")
     profiles = (
         [Profile(**value) for value in json.loads(profiles_path.read_text()).values()]
         if profiles_path.exists()
@@ -134,7 +135,8 @@ def schema_summary(output_dir: str | Path) -> dict:
 def write_schema_report(output_dir: str | Path) -> dict:
     output = Path(output_dir).expanduser()
     summary = schema_summary(output)
-    _atomic_json(output / "schema.json", summary)
+    internal_dir(output).mkdir(parents=True, exist_ok=True)
+    _atomic_json(internal_dir(output) / "schema.json", summary)
     lines = [
         "# pyXcom 数据字段与主帖/评论分类",
         "",
@@ -203,20 +205,29 @@ def write_schema_report(output_dir: str | Path) -> dict:
         "CSV 中数组字段是 JSON 字符串；JSONL 中保留数组、整数及 null。`captured_at_utc` 的旧记录为空时，不能用批次导出时间冒充每条帖子的抓取时间。",
         "",
     ]
-    (output / "schema_report.md").write_text("\n".join(lines), encoding="utf-8")
+    (internal_dir(output) / "schema_report.md").write_text(
+        "\n".join(lines), encoding="utf-8"
+    )
     return summary
 
 
 def apply_role_schema(output_dir: str | Path) -> dict:
     """Backfill role/type in saved JSONL; preserve gzipped originals once."""
     output = Path(output_dir).expanduser()
+    migrate_collection(output)
     changed: list[str] = []
     paths = sorted(
-        output.rglob("posts.jsonl"), key=lambda path: len(path.parts), reverse=True
+        (
+            p
+            for p in output.rglob("posts.jsonl")
+            if "legacy" not in p.relative_to(output).parts
+        ),
+        key=lambda path: len(path.parts),
+        reverse=True,
     )
     for path in paths:
-        folder = path.parent
-        state_path = folder / "state.json"
+        folder = path.parent.parent if path.parent.name == ".pyxcom" else path.parent
+        state_path = source_path(folder, "state.json")
         if not state_path.exists():
             continue
         raw = [
@@ -231,7 +242,7 @@ def apply_role_schema(output_dir: str | Path) -> dict:
             for record, post in zip(raw, posts)
         ):
             continue
-        backup = folder / "posts.jsonl.before-role-schema.gz"
+        backup = path.parent / "posts.jsonl.before-role-schema.gz"
         if not backup.exists():
             with gzip.open(backup, "wb") as file:
                 file.write(path.read_bytes())
@@ -247,10 +258,15 @@ def apply_role_schema(output_dir: str | Path) -> dict:
             reason=state.get("reason", "migrated"),
         )
         changed.append(str(folder))
-    if (output / "profiles.json").exists():
+    if source_path(output, "profiles.json").exists():
         finalize_collection(output)
     summary = write_schema_report(output)
-    validations = [validate_collection(path.parent) for path in paths]
+    validations = [
+        validate_collection(
+            path.parent.parent if path.parent.name == ".pyxcom" else path.parent
+        )
+        for path in paths
+    ]
     if not all(result["valid"] for result in validations):
         raise ValueError("One or more migrated collections failed validation")
     return {

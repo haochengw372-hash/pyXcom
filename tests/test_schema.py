@@ -46,7 +46,7 @@ class SchemaTests(unittest.TestCase):
                 record.pop("post_role")
                 record.pop("post_type")
                 old_records.append(record)
-            (output / "posts.jsonl").write_text(
+            (output / ".pyxcom" / "posts.jsonl").write_text(
                 "".join(json.dumps(row) + "\n" for row in old_records),
                 encoding="utf-8",
             )
@@ -55,7 +55,9 @@ class SchemaTests(unittest.TestCase):
             self.assertEqual(
                 result["type_counts"], {"original": 1, "reply": 1, "quote": 1}
             )
-            self.assertTrue((output / "posts.jsonl.before-role-schema.gz").exists())
+            self.assertTrue(
+                (output / ".pyxcom" / "posts.jsonl.before-role-schema.gz").exists()
+            )
             self.assertTrue(validate_collection(output)["valid"])
             self.assertEqual(apply_role_schema(output)["changed_directories"], [])
 

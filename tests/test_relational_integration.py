@@ -38,14 +38,16 @@ class RelationalIntegrationTests(unittest.TestCase):
             store.finish(complete=True, reason="test")
             self.assertTrue(validate_tables(output)["valid"])
             self.assertTrue(validate_collection(output)["valid"])
-            original = (output / "posts.jsonl").read_bytes()
+            original = (output / ".pyxcom" / "posts.jsonl").read_bytes()
             with patch(
                 "pyxcom.cli.XClient", side_effect=AssertionError("must stay offline")
             ):
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(main(["export", "--output", folder]), 0)
-            self.assertEqual(original, (output / "posts.jsonl").read_bytes())
-            csv_path = output / "tables" / "comments.csv"
+            self.assertEqual(
+                original, (output / ".pyxcom" / "posts.jsonl").read_bytes()
+            )
+            csv_path = output / "comments.csv"
             csv_path.write_bytes(csv_path.read_bytes().replace(b"reply", b"tampered"))
             self.assertFalse(validate_tables(output)["valid"])
             self.assertFalse(validate_collection(output)["valid"])

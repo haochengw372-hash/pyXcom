@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from .layout import source_path
 from .models import CollectionResult
 from .storage import PostStore, _atomic_json
 from .transport import now_utc
@@ -14,10 +15,10 @@ from .validate_tables import validate_tables
 def finalize_collection(output_dir: str | Path) -> CollectionResult:
     """Rebuild CSV, hashes, and report after an interrupted collection."""
     output = Path(output_dir).expanduser()
-    state = json.loads((output / "state.json").read_text(encoding="utf-8"))
+    state = json.loads((source_path(output, "state.json")).read_text(encoding="utf-8"))
     store = PostStore(output, query=state["query"])
-    profiles_path = output / "profiles.json"
-    if profiles_path.exists():
+    profiles_path = source_path(output, "profiles.json")
+    if profiles_path.exists() and state["query"].get("kind") == "account_batch":
         from .batch import _account_status, _write_batch_report
 
         profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
@@ -33,7 +34,7 @@ def finalize_collection(output_dir: str | Path) -> CollectionResult:
         complete = all(account["complete"] for account in accounts)
         reason = "all_accounts_complete" if complete else "interrupted_or_partial"
         _atomic_json(
-            output / "account_manifest.json",
+            source_path(output, "account_manifest.json"),
             {
                 "query": state["query"],
                 "accounts": accounts,
@@ -51,11 +52,13 @@ def finalize_collection(output_dir: str | Path) -> CollectionResult:
 
 def validate_collection(output_dir: str | Path) -> dict:
     output = Path(output_dir).expanduser()
-    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (source_path(output, "manifest.json")).read_text(encoding="utf-8")
+    )
     rows = []
     errors: list[str] = []
     for number, line in enumerate(
-        (output / "posts.jsonl").read_text(encoding="utf-8").split("\n"), 1
+        (source_path(output, "posts.jsonl")).read_text(encoding="utf-8").split("\n"), 1
     ):
         if not line.strip():
             continue
@@ -63,7 +66,9 @@ def validate_collection(output_dir: str | Path) -> dict:
             rows.append(json.loads(line))
         except json.JSONDecodeError:
             errors.append(f"invalid_jsonl_line:{number}")
-    with (output / "posts.csv").open(encoding="utf-8-sig", newline="") as file:
+    with (source_path(output, "posts.csv")).open(
+        encoding="utf-8-sig", newline=""
+    ) as file:
         csv_rows = list(csv.DictReader(file))
     if len(rows) != manifest["post_count"] or len(csv_rows) != len(rows):
         errors.append("row_count_mismatch")
@@ -78,20 +83,25 @@ def validate_collection(output_dir: str | Path) -> dict:
     ):
         errors.append("post_outside_date_range")
     for filename, digest in manifest.get("sha256", {}).items():
-        if hashlib.sha256((output / filename).read_bytes()).hexdigest() != digest:
+        if (
+            hashlib.sha256(source_path(output, filename).read_bytes()).hexdigest()
+            != digest
+        ):
             errors.append(f"hash_mismatch:{filename}")
-    profiles_path = output / "profiles.json"
+    profiles_path = source_path(output, "profiles.json")
+    profiles = {}
     if profiles_path.exists():
         profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
         user_ids = {profile["id"] for profile in profiles.values()}
         if any(row["author_id"] not in user_ids for row in rows):
             errors.append("unexpected_author_id")
+    if source_path(output, "account_manifest.json").exists():
         account_manifest = json.loads(
-            (output / "account_manifest.json").read_text(encoding="utf-8")
+            (source_path(output, "account_manifest.json")).read_text(encoding="utf-8")
         )
         if len(account_manifest["accounts"]) != len(profiles):
             errors.append("account_manifest_mismatch")
-    if (output / "tables").exists():
+    if (output / "tables").exists() or (output / "comments.csv").exists():
         errors.extend(validate_tables(output)["errors"])
     return {
         "output_dir": str(output),

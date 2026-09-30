@@ -34,7 +34,8 @@ def record(post_id, parent=None, root=None, quote=None, repost=None):
 
 
 def save(tmp_path, records):
-    source = tmp_path / "posts.jsonl"
+    source = tmp_path / ".pyxcom" / "posts.jsonl"
+    source.parent.mkdir(exist_ok=True)
     source.write_text(
         "\n".join(json.dumps(p.to_dict(), ensure_ascii=False) for p in records),
         encoding="utf-8",
@@ -43,9 +44,7 @@ def save(tmp_path, records):
 
 
 def rows(tmp_path, table):
-    with (tmp_path / "tables" / f"{table}.csv").open(
-        encoding="utf-8-sig", newline=""
-    ) as stream:
+    with (tmp_path / f"{table}.csv").open(encoding="utf-8-sig", newline="") as stream:
         return list(csv.DictReader(stream))
 
 
@@ -136,7 +135,7 @@ def case_empty_and_stale_interactions(tmp_path):
     assert rows(tmp_path, "posts") == []
     assert rows(tmp_path, "comments") == []
     assert rows(tmp_path, "users") == []
-    assert not (tmp_path / "tables" / "interactions.csv").exists()
+    assert not (tmp_path / "interactions.csv").exists()
 
 
 def case_deep_thread_is_iterative(tmp_path):
