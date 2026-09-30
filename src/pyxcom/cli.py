@@ -156,6 +156,18 @@ def build_parser() -> argparse.ArgumentParser:
     replies.add_argument(
         "--output-dir", "--output", dest="output", type=Path, required=True
     )
+    comments = commands.add_parser(
+        "post-comments",
+        parents=[common],
+        help="Collect replies below one main post, including nested replies",
+    )
+    comments.add_argument("post_id_or_url")
+    comments.add_argument("--max-depth", type=int, default=2)
+    comments.add_argument("--max-comments", type=int, default=100)
+    comments.add_argument("--max-pages", type=int, default=20)
+    comments.add_argument(
+        "--output-dir", "--output", dest="output", type=Path, required=True
+    )
     return parser
 
 
@@ -216,7 +228,16 @@ def main(argv: list[str] | None = None) -> int:
             mirror_base=args.mirror_base,
             delay=args.delay,
         ) as client:
-            if args.command == "profile":
+            if args.command == "post-comments":
+                result = client.save_post_comments(
+                    args.post_id_or_url,
+                    args.output,
+                    max_depth=args.max_depth,
+                    max_comments=args.max_comments,
+                    max_pages=args.max_pages,
+                )
+                print(json.dumps(result.to_dict(), ensure_ascii=False))
+            elif args.command == "profile":
                 _write_or_print(client.get_user(args.handle).to_dict(), args.output)
             elif args.command == "post":
                 _write_or_print(

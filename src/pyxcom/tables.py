@@ -242,7 +242,7 @@ def export_tables(output_dir: str | Path) -> dict:
         _write_csv(target / name, columns, rows)
     if not interactions:
         (target / "interactions.csv").unlink(missing_ok=True)
-    manifest = {
+    manifest: dict = {
         "schema_version": "1.1",
         "layout_version": "2.0",
         "source_kind": "saved_post_observations",
@@ -282,6 +282,23 @@ def export_tables(output_dir: str | Path) -> dict:
         ):
             if key in collection:
                 manifest[key] = collection[key]
+    state_path = source_path(directory, "state.json")
+    if manifest.get("query", {}).get("kind") == "post_comments" and state_path.exists():
+        state = json.loads(state_path.read_text(encoding="utf-8")).get(
+            "conversation", {}
+        )
+        manifest["comment_collection"] = {
+            "max_depth": manifest["query"]["max_depth"],
+            "pending_requests": len(state.get("queue", [])),
+            "unresolved_or_deferred_records": len(state.get("pending", {})),
+            "pagination_warnings": sorted(set(state.get("pagination_warnings", []))),
+            "depth_counts": {
+                str(depth): sum(row["depth"] == depth for row in comments)
+                for depth in sorted(
+                    {row["depth"] for row in comments if row["depth"] is not None}
+                )
+            },
+        }
     with NamedTemporaryFile("w", encoding="utf-8", dir=target, delete=False) as stream:
         temporary = Path(stream.name)
         json.dump(manifest, stream, ensure_ascii=False, indent=2)

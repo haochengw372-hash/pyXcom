@@ -1,4 +1,4 @@
-# Public API — pyXcom 0.5
+# Public API — pyXcom 0.6
 
 Import `XClient`, `Profile`, `Post`, `CollectionResult`, `PyXcomError`, `AuthenticationError`, `APIError`, and `RateLimitError` from `pyxcom`.
 
@@ -49,6 +49,24 @@ save_users_activity(handles, output_dir, *, since, until, pages_per_round=5,
 `handle: str`; `handles: list[str]`; `output_dir: str | Path`. Dates are `str | None` in YYYY-MM-DD UTC. `max_pages` and `limit` are positive `int | None`. `progress` is an optional callable taking a dictionary. `get`/`iter` start a fresh traversal; `save` resumes the same dataset query. `limit` on a saved timeline/mirror search is checked after a page; it may overshoot. Account activity and multi-account saves intentionally have no total-record `limit`.
 
 `user_posts` defaults to original/quote main posts. `user_replies` returns authored replies, including self-replies. Neither is an API to retrieve a main post's entire received comment tree. `timeline` is a compatibility option for selecting the source stream.
+
+## Comments received by a main post
+
+```python
+iter_post_comments(post_id_or_url: str, *, max_depth: int = 2,
+                   max_comments: int | None = 100,
+                   max_pages: int | None = 20) -> Iterator[Post]
+get_post_comments(post_id_or_url: str, *, max_depth: int = 2,
+                  max_comments: int | None = 100,
+                  max_pages: int | None = 20) -> list[Post]
+save_post_comments(post_id_or_url: str, output_dir: str | Path, *,
+                   max_depth: int = 2, max_comments: int | None = 100,
+                   max_pages: int | None = 20) -> CollectionResult
+```
+
+These methods query the main post's conversation and expand replies from all visible authors. They differ from `*_user_replies`, which fetch only one account's authored replies. `get` and `iter` return comments only; `save` includes the root in `posts.csv`, profiles in `users.csv`, comments in `comments.csv`, and private traversal state for resume.
+
+Depth is relative to the main post (direct replies=1). Comment cap is exact and cumulative per dataset; page cap applies to each call. A rate-limited save preserves its queue with `complete=false`; memory/iterator methods raise `RateLimitError`. Network/parse failures save a partial checkpoint and raise. Repeating a save with larger comment/page budgets resumes it; changing root/depth is rejected to protect query consistency. Completion only means visible traversal within the requested depth ended, not an exhaustive historical thread.
 
 ## Keyword search
 

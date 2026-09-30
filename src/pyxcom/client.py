@@ -793,3 +793,108 @@ class XClient:
             wait_on_rate_limit=wait_on_rate_limit,
             progress=progress,
         )
+
+    def iter_post_comments(
+        self,
+        post_id_or_url: str,
+        *,
+        max_depth: int = 2,
+        max_comments: int | None = 100,
+        max_pages: int | None = 20,
+    ) -> Iterator[Post]:
+        """Stream other-user and self replies, bounded by depth and total comments."""
+        from .comments import CommentTraversal
+
+        traversal = CommentTraversal(
+            self,
+            _post_id(post_id_or_url),
+            max_depth=max_depth,
+            max_comments=max_comments,
+            max_pages=max_pages,
+        )
+        for page in traversal.pages():
+            yield from (post for post in page if post.in_reply_to_id)
+        if traversal.reason == "rate_limited":
+            raise RateLimitError(
+                "X rate-limited comment collection",
+                traversal.state.get("rate_reset_at"),
+            )
+
+    def get_post_comments(
+        self,
+        post_id_or_url: str,
+        *,
+        max_depth: int = 2,
+        max_comments: int | None = 100,
+        max_pages: int | None = 20,
+    ) -> list[Post]:
+        """Return observed replies to one main post, including multiple levels."""
+        return list(
+            self.iter_post_comments(
+                post_id_or_url,
+                max_depth=max_depth,
+                max_comments=max_comments,
+                max_pages=max_pages,
+            )
+        )
+
+    def save_post_comments(
+        self,
+        post_id_or_url: str,
+        output_dir: str | Path,
+        *,
+        max_depth: int = 2,
+        max_comments: int | None = 100,
+        max_pages: int | None = 20,
+    ) -> CollectionResult:
+        """Save a root post, its reply tree and observed author profiles; resume safely."""
+        from .comments import CommentTraversal
+
+        root_id = _post_id(post_id_or_url)
+        # Validate bounds before creating or migrating output.
+        CommentTraversal(
+            self,
+            root_id,
+            max_depth=max_depth,
+            max_comments=max_comments,
+            max_pages=max_pages,
+        )
+        store = PostStore(
+            output_dir,
+            query={
+                "kind": "post_comments",
+                "root_post_id": root_id,
+                "max_depth": max_depth,
+            },
+        )
+        if store.complete:
+            return store.finish(complete=True, reason=store.state["reason"])
+        traversal = CommentTraversal(
+            self,
+            root_id,
+            max_depth=max_depth,
+            max_comments=max_comments,
+            max_pages=max_pages,
+            records=store._posts,
+            state=store.state.setdefault("conversation", {}),
+        )
+
+        def save_profiles():
+            author_ids = {post.author_id for post in traversal.records.values()}
+            profiles = {
+                handle: profile
+                for handle, profile in traversal.state["profiles"].items()
+                if profile["id"] in author_ids
+            }
+            _atomic_json(source_path(output_dir, "profiles.json"), profiles)
+
+        try:
+            for page in traversal.pages():
+                save_profiles()
+                store.append_page(page, None, count_page=traversal.page_was_fetched)
+        except Exception:
+            save_profiles()
+            store.finish(complete=False, reason="interrupted_or_error")
+            raise
+        save_profiles()
+        return store.finish(complete=traversal.complete, reason=traversal.reason)

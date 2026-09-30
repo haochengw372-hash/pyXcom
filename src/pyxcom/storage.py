@@ -61,7 +61,9 @@ class PostStore:
     def complete(self) -> bool:
         return self.state["complete"]
 
-    def append_page(self, posts: list[Post], next_cursor: str | None) -> int:
+    def append_page(
+        self, posts: list[Post], next_cursor: str | None, *, count_page: bool = True
+    ) -> int:
         added = 0
         with self._jsonl.open("a", encoding="utf-8") as file:
             for post in posts:
@@ -74,7 +76,7 @@ class PostStore:
             os.fsync(file.fileno())
         self.state.update(
             cursor=next_cursor,
-            pages_fetched=self.state["pages_fetched"] + 1,
+            pages_fetched=self.state["pages_fetched"] + int(count_page),
             reason="in_progress",
         )
         _atomic_json(self._state_path, self.state)

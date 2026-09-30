@@ -192,6 +192,31 @@ class XTransport:
                     found.append(post)
         return found
 
+    def conversation_page(self, post_id: str, cursor: str | None = None) -> dict:
+        """Read a post's conversation, including replies by other authors.
+
+        A focal post may itself be a reply; callers can expand such branches to
+        discover nested comments that the root conversation omits.
+        """
+        variables = {
+            "focalTweetId": post_id,
+            "with_rux_injections": False,
+            "includePromotedContent": False,
+            "withCommunity": True,
+            "withQuickPromoteEligibilityTweetFields": True,
+            "withBirdwatchNotes": True,
+            "withVoice": True,
+            "withV2Timeline": True,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+        return self.graphql(
+            "TweetDetail",
+            variables,
+            features=TWEET_FEATURES,
+            field_toggles={"withArticleRichContentState": False},
+        )
+
     def user_timeline_page(
         self, user_id: str, *, timeline: str, cursor: str | None = None
     ) -> dict:

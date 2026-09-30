@@ -90,7 +90,7 @@ def validate_collection(output_dir: str | Path) -> dict:
             errors.append(f"hash_mismatch:{filename}")
     profiles_path = source_path(output, "profiles.json")
     profiles = {}
-    if profiles_path.exists():
+    if profiles_path.exists() and query.get("kind") != "post_comments":
         profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
         user_ids = {profile["id"] for profile in profiles.values()}
         if any(row["author_id"] not in user_ids for row in rows):

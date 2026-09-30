@@ -61,6 +61,7 @@ Methods belong to `XClient`. Every method lists its accepted parameters explicit
 | Multiple post IDs | `get_posts(post_ids)` | — | — |
 | Authored main posts | `get_user_posts(handle, ...)` | `iter_user_posts(handle, ...)` | `save_user_posts(handle, output_dir, ...)` |
 | Authored replies | `get_user_replies(handle, ...)` | `iter_user_replies(handle, ...)` | `save_user_replies(handle, output_dir, ...)` |
+| Replies below a main post | `get_post_comments(post_id_or_url, ...)` | `iter_post_comments(post_id_or_url, ...)` | `save_post_comments(post_id_or_url, output_dir, ...)` |
 | Keyword matches | `get_search_posts(keyword, ...)` | `iter_search_posts(keyword, ...)` | `save_search_posts(keyword, output_dir, ...)` |
 | Main posts + replies | — | — | `save_user_activity(handle, output_dir, ...)` |
 | Multiple accounts | — | — | `save_users_activity(handles, output_dir, ...)` |
@@ -103,6 +104,32 @@ with XClient(profile="Default") as client:
 
 Repeat to resume. `rounds=0, wait_on_rate_limit=True` keeps running and waits for rate windows when needed. `progress=callback` receives status dictionaries.
 
+## Collect a main post and nested comments
+
+```python
+with XClient(profile="Default") as client:
+    result = client.save_post_comments(
+        "1973931546550894681",
+        output_dir="output/tibo_conversation",
+        max_depth=2,
+        max_comments=100,
+        max_pages=20,
+    )
+    print(result.complete, result.reason)
+```
+
+```bash
+pyxcom post-comments 1973931546550894681 --profile Default \
+  --max-depth 2 --max-comments 100 --max-pages 20 \
+  --output-dir output/tibo_conversation
+```
+
+The root belongs in `posts.csv`, replies from **all visible authors** in `comments.csv`, and author profiles in `users.csv`. The root must be a main post. Level 1 replies directly to it; level 2 replies to those comments. Quoted content, unrelated recommendations and comments beyond the requested depth are excluded. Profile details absent from the response remain unavailable.
+
+`max_comments` is an exact total comment cap, excluding the root. `max_pages` caps conversation requests per call. Repeat the same root/depth/output to resume saved branches and cursors; raise the comment cap to continue a capped dataset. Pending page records are retained, so stopping midway through a page does not skip them. Changing depth requires a separate dataset. Python accepts `None` for unlimited comment/page budgets; depth must be positive.
+
+Stop reasons include `comment_limit`, `page_limit`, `rate_limited`, `partial_conversation`, and `visible_source_end`. `complete=true` means the visible queue was exhausted **within the requested depth**, not that every comment on X was recovered. Missing ancestors and stalled pagination are reported as partial. `iter_post_comments` / `get_post_comments` return reply records without writing a dataset; use `save_post_comments` when you need coverage status and resumability.
+
 ## Output
 
 ```text
@@ -122,7 +149,7 @@ output/tibo_year/
 
 Replies to oneself remain comments. A quote within a reply retains its quote link in `comments.csv`. Direct replies are depth 1; replies to those are depth 2. Missing ancestry leaves `depth` empty with a `depth_status`; `parent_in_dataset` and `root_in_dataset` indicate observed relationships. Do not interpret missing parents as first-level replies.
 
-`user_replies` means replies **authored by the selected account**. This release does not recursively collect all other users' comments below a main post. The schema can represent multiple levels; that does not establish full conversation coverage.
+`user_replies` means replies **authored by the selected account**. Use `*_post_comments` to collect replies below a particular main post from all visible authors, including nested replies. Neither endpoint establishes full conversation coverage.
 
 CSV conventions: UTF-8 with BOM, snake_case columns, string IDs (import as text in Excel), JSON arrays for list fields, empty values for unavailable scalars, UTC timestamp fields. Users without a saved profile have `profile_available=false`. Engagement counts are snapshots; unknown values are not replaced with zero.
 
@@ -174,4 +201,4 @@ Old Python names `get_search`, `iter_search`, `save_search` (with `user=`), and 
 
 Old CLI names `profile`, `posts`, `activity`, `search`, `batch`, `--user` and dataset `--output` remain aliases. Existing code reading root `posts.csv` as a mixed table must adapt: it now contains main posts only; replies are in `comments.csv`.
 
-X endpoints may change or impose limits. pyXcom discovers current GraphQL query IDs from X's web bundle, while response parsers still need maintenance. A completed run indicates the requested date boundary or visible source end was reached, not proof of all historical content. Deleted, protected or unavailable posts cannot be recovered. No new live-acquisition capability is implied by an output migration.
+X endpoints may change or impose limits. pyXcom discovers current GraphQL query IDs from X's web bundle, while response parsers still need maintenance. A completed run indicates the requested date boundary or visible source end was reached, not proof of all historical content. Deleted, protected or unavailable posts cannot be recovered. Output migration alone does not fetch comments; call `save_post_comments` to acquire them from X.
