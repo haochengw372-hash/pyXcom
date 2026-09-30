@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.26"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,6 +7,9 @@ name = "pyXcom"
 version = "0.6.0"
 description = "Collect public X profiles, posts, replies, and search results with your existing browser session"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Haocheng Wang"}]
 requires-python = ">=3.10"
 dependencies = [
   "browser-cookie3>=0.19,<1",
@@ -30,4 +33,4 @@ pyxcom = "pyxcom.cli:main"
 packages = ["src/pyxcom"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src/pyxcom", "/README.md", "/pyproject.toml", "/examples", "/docs"]
+include = ["/src/pyxcom", "/README.md", "/pyproject.toml", "/examples", "/docs", "/LICENSE", "/CITATION.cff"]

@@ -202,3 +202,30 @@ Old Python names `get_search`, `iter_search`, `save_search` (with `user=`), and 
 Old CLI names `profile`, `posts`, `activity`, `search`, `batch`, `--user` and dataset `--output` remain aliases. Existing code reading root `posts.csv` as a mixed table must adapt: it now contains main posts only; replies are in `comments.csv`.
 
 X endpoints may change or impose limits. pyXcom discovers current GraphQL query IDs from X's web bundle, while response parsers still need maintenance. A completed run indicates the requested date boundary or visible source end was reached, not proof of all historical content. Deleted, protected or unavailable posts cannot be recovered. Output migration alone does not fetch comments; call `save_post_comments` to acquire them from X.
+
+
+## License
+
+pyXcom is released under the [MIT License](LICENSE). Copyright © 2026 Haocheng Wang.
+
+## Citation
+
+If you use pyXcom in a paper, thesis, dataset, or other research output, please cite the software and report the version used. GitHub's **Cite this repository** menu reads the machine-readable [CITATION.cff](CITATION.cff).
+
+**Suggested reference**
+
+Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 0.6.0) [Computer software]. https://github.com/haochengw372-hash/pyXcom
+
+**BibTeX**
+
+```bibtex
+@software{wang2026pyxcom,
+  author  = {Wang, Haocheng},
+  title   = {{pyXcom}: Structured and Auditable X Data Collection for Communication Research},
+  year    = {2026},
+  version = {0.6.0},
+  url     = {https://github.com/haochengw372-hash/pyXcom}
+}
+```
+
+For reproducible reporting, also describe the collection dates, account or keyword scope, comment-depth limits, package version, and coverage/stop reasons recorded in the output manifest. No DOI or published-paper citation is currently assigned; this reference cites the software itself. Citation is appreciated and does not add a condition to the MIT license.

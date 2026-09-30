@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use pyXcom in your research, please cite this software and report the version used."
+type: software
+title: "pyXcom: Structured and Auditable X Data Collection for Communication Research"
+authors:
+  - family-names: Wang
+    given-names: Haocheng
+version: 0.6.0
+date-released: 2026-09-30
+license: MIT
+repository-code: "https://github.com/haochengw372-hash/pyXcom"
+url: "https://github.com/haochengw372-hash/pyXcom"
+abstract: "A Python package for collecting public X profiles, authored posts and replies, keyword matches, and bounded multi-level conversations with linked tables and resumable collection."
+keywords:
+  - computational communication
+  - social media
+  - X
+  - data collection
+  - Python
