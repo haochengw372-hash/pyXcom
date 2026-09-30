@@ -5,6 +5,7 @@ title: "pyXcom: Structured and Auditable X Data Collection for Communication Res
 authors:
   - family-names: Wang
     given-names: Haocheng
+    affiliation: Communication University of China
 version: 0.6.0
 date-released: 2026-09-30
 license: MIT

@@ -8,11 +8,13 @@ The interface follows [PykTok](https://github.com/dfreelon/pyktok)'s approachabl
 
 ## Install
 
-Python 3.10 or newer. From a cloned repository:
+Python 3.10 or newer:
 
 ```bash
-python -m pip install .
+python -m pip install pyXcom
 ```
+
+From a cloned repository, use `python -m pip install .`.
 
 Or in a development environment:
 
@@ -21,7 +23,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 ```
 
-This package has not been published to PyPI. The distribution name is `pyXcom`; the import and command are `pyxcom`.
+The distribution name is `pyXcom`; the import and command are `pyxcom`.
 
 ## Quick start
 
@@ -209,6 +211,8 @@ X endpoints may change or impose limits. pyXcom discovers current GraphQL query 
 pyXcom is released under the [MIT License](LICENSE). Copyright © 2026 Haocheng Wang.
 
 ## Citation
+
+**Author:** Haocheng Wang, Communication University of China.
 
 If you use pyXcom in a paper, thesis, dataset, or other research output, please cite the software and report the version used. GitHub's **Cite this repository** menu reads the machine-readable [CITATION.cff](CITATION.cff).
 
