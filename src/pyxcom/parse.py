@@ -217,7 +217,13 @@ def _timeline_item_contents(data: dict) -> Iterator[dict]:
                     yield content
                 for module_item in content["items"]:
                     item = module_item.get("item") or module_item
-                    yield item.get("itemContent") or item
+                    content_item = item.get("itemContent") or item
+                    yield {
+                        **content_item,
+                        "_timeline_entry_id": module_item.get(
+                            "entryId", entry.get("entryId")
+                        ),
+                    }
             else:
                 item = content.get("itemContent") or content
                 if (
@@ -226,10 +232,13 @@ def _timeline_item_contents(data: dict) -> Iterator[dict]:
                     and not item.get("entryType")
                 ):
                     item = {**item, "entryType": "TimelineTimelineCursor"}
-                yield item
+                yield {**item, "_timeline_entry_id": entry.get("entryId")}
         for module_item in instruction.get("moduleItems", []):
             item = module_item.get("item") or module_item
-            yield item.get("itemContent") or item
+            yield {
+                **(item.get("itemContent") or item),
+                "_timeline_entry_id": module_item.get("entryId"),
+            }
 
 
 def timeline_primary_posts(

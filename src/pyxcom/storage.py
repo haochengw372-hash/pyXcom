@@ -264,6 +264,11 @@ class PostStore:
                 if "discovery_pagination" in self.state
                 else {}
             ),
+            **(
+                {"source_content": self.state["source_content"]}
+                if "source_content" in self.state
+                else {}
+            ),
             "query": self.state["query"],
             "post_count": len(rows),
             "pages_fetched": self.state["pages_fetched"],

@@ -250,14 +250,14 @@ class DiscoveryPaginationTests(unittest.TestCase):
                 ],
             },
         )
-        for payload in (page(unavailable, cursor="next"), unknown):
+        for payload in (page(unavailable, end=True), unknown):
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmp:
                 client = Client()
                 client._x.search_page.return_value = payload
                 result = client.save_search_query("reset", tmp, max_pages=5)
-                self.assertEqual(result.reason, "parse_error")
+                self.assertEqual(result.reason, "partial_source_content")
                 self.assertFalse(result.complete)
-                self.assertNotIn(
+                self.assertIn(
                     "discovery_pagination",
                     json.loads(source_path(tmp, "state.json").read_text()),
                 )
