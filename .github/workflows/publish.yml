@@ -35,9 +35,9 @@ jobs:
       - name: Test the installed wheel
         run: |
           python -m venv .release-venv
-          .release-venv/bin/python -m pip install dist/*.whl
+          .release-venv/bin/python -m pip install dist/*.whl pytest
           .release-venv/bin/python -m pip check
-          .release-venv/bin/python -m unittest discover -s tests -v
+          .release-venv/bin/python -m pytest -q
           .release-venv/bin/pyxcom --help
       - uses: actions/upload-artifact@v4
         with:

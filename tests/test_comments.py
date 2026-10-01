@@ -17,7 +17,7 @@ B = "1973934669768146983"
 C = "1974042873461903431"
 
 
-def tweet(post_id, parent=None, *, root=ROOT, replies=0, handle="other"):
+def tweet(post_id, parent=None, *, root=ROOT, replies=0, handle="other", day="29"):
     return {
         "rest_id": post_id,
         "core": {
@@ -34,7 +34,7 @@ def tweet(post_id, parent=None, *, root=ROOT, replies=0, handle="other"):
         },
         "legacy": {
             "user_id_str": "123" if handle == "other" else "456",
-            "created_at": "Mon Sep 29 07:39:00 +0000 2025",
+            "created_at": f"Mon Sep {day} 07:39:00 +0000 2025",
             "full_text": "example",
             "conversation_id_str": root,
             "in_reply_to_status_id_str": parent,
@@ -143,17 +143,85 @@ class CommentTests(unittest.TestCase):
         self.assertEqual(t.state["unresolved_count"], 1)
         self.assertEqual(set(t.records), {ROOT})
 
-    def test_root_must_be_main_post(self):
-        root = parse_post(tweet(ROOT))
-        for invalid in (
-            replace(root, in_reply_to_id=A),
-            replace(root, reposted_post_id=A),
+    def test_repost_seed_is_rejected(self):
+        c = client()
+        c.get_post.return_value = replace(parse_post(tweet(ROOT)), reposted_post_id=A)
+        with self.assertRaisesRegex(ValueError, "not a repost"):
+            list(traversal(c).pages())
+        c._x.conversation_page.assert_not_called()
+
+    def test_reply_seed_keeps_only_its_descendant_branch(self):
+        c = client(page(tweet(ROOT), tweet(A, ROOT), tweet(B, A), tweet(C, ROOT)))
+        c.get_post.return_value = parse_post(tweet(A, ROOT))
+        t = CommentTraversal(c, A, max_depth=1, max_comments=1, max_pages=None)
+        list(t.pages())
+        self.assertEqual(set(t.records), {A, B})
+        self.assertEqual(t.state["conversation_id"], ROOT)
+        self.assertEqual(t.state["depths"], {A: 0, B: 1})
+        self.assertEqual(t.comment_count, 1)
+        self.assertEqual(t.records[A].observation_role, "seed")
+        self.assertEqual(t.reason, "comment_limit")
+
+    def test_other_branch_ancestry_does_not_make_result_partial(self):
+        c = client(page(tweet(B, C), tweet(C, ROOT)))
+        c.get_post.return_value = parse_post(tweet(A, ROOT))
+        t = CommentTraversal(c, A, max_depth=2, max_comments=None, max_pages=None)
+        list(t.pages())
+        self.assertEqual(set(t.records), {A})
+        self.assertEqual(t.state["unresolved_count"], 0)
+        self.assertTrue(t.complete)
+
+    def test_window_preserves_outside_parent_without_consuming_comment_budget(self):
+        c = client(
+            page(tweet(A, ROOT, day="28"), tweet(B, A), tweet(C, ROOT, day="30"))
+        )
+        t = traversal(c, since="2025-09-29", until="2025-09-30", max_comments=1)
+        list(t.pages())
+        self.assertEqual(t.comment_count, 1)
+        self.assertEqual(t.state["accepted_ids"], [B])
+        self.assertEqual(t.records[A].observation_role, "context")
+        self.assertEqual(t.records[B].observation_role, "analysis")
+        self.assertEqual(t.state["depths"][B], 2)
+        self.assertEqual(t.reason, "comment_limit")
+
+    def test_outside_parent_is_expanded_to_find_within_window_descendant(self):
+        c = client(page(tweet(A, ROOT, replies=1, day="28")), page(tweet(B, A)))
+        t = traversal(c, since="2025-09-29", until="2025-09-30")
+        list(t.pages())
+        self.assertTrue(t.complete)
+        self.assertEqual(t.state["accepted_ids"], [B])
+        c._x.conversation_page.assert_called_with(A, cursor=None)
+
+    def test_window_bounds_are_inclusive_exclusive_and_resume_eligible_ids(self):
+        c = client(
+            page(tweet(A, ROOT, day="28"), tweet(B, ROOT), tweet(C, ROOT, day="30"))
+        )
+        t = traversal(c, since="2025-09-29", until="2025-09-30", max_pages=1)
+        list(t.pages())
+        self.assertEqual(t.state["accepted_ids"], [B])
+        self.assertEqual(t.records[C].observation_role, "context")
+        resumed = traversal(
+            c, records=t.records, state=t.state, since="2025-09-29", until="2025-09-30"
+        )
+        list(resumed.pages())
+        self.assertTrue(resumed.complete)
+        self.assertEqual(resumed.comment_count, 1)
+        self.assertEqual(resumed.state["depths"], t.state["depths"])
+
+    def test_invalid_window_is_rejected(self):
+        for bounds in (
+            {"since": "bad"},
+            {"since": "2025-09-30", "until": "2025-09-29"},
         ):
-            c = client()
-            c.get_post.return_value = invalid
-            with self.assertRaisesRegex(ValueError, "main post"):
-                list(traversal(c).pages())
-            c._x.conversation_page.assert_not_called()
+            with self.assertRaises(ValueError):
+                traversal(client(), **bounds)
+
+    def test_latest_response_and_request_available_for_archival(self):
+        response = page(tweet(A, ROOT), cursor="next")
+        t = traversal(client(response), max_pages=1)
+        list(t.pages())
+        self.assertIs(t.latest_payload, response)
+        self.assertEqual(t.latest_request, {"focalTweetId": ROOT})
 
     def test_save_resume_preserves_pending_and_normalized_tables(self):
         c = client(page(tweet(A, ROOT), tweet(B, A)))

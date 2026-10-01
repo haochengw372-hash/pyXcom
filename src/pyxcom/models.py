@@ -66,13 +66,51 @@ class Post:
     discovery_source: str | None = None
     discovery_url: str | None = None
     captured_at_utc: str | None = None
+    in_reply_to_user_id: str | None = None
+    quoted_author_id: str | None = None
+    reposted_author_id: str | None = None
+    reposted_created_at_utc: str | None = None
+    raw_json: dict | None = None
+    text_source: str | None = None
+    text_complete: bool | None = None
+    observation_role: str = "analysis"
 
     def __post_init__(self) -> None:
+        for name in (
+            "id",
+            "author_id",
+            "conversation_id",
+            "in_reply_to_id",
+            "quoted_post_id",
+            "reposted_post_id",
+            "in_reply_to_user_id",
+            "quoted_author_id",
+            "reposted_author_id",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, str(value))
         role, kind = classify_post(
             self.in_reply_to_id, self.quoted_post_id, self.reposted_post_id
         )
         object.__setattr__(self, "post_role", role)
         object.__setattr__(self, "post_type", kind)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Relationship:
+    """An observed directed edge; observation time is not its creation time."""
+
+    source_user_id: str
+    target_user_id: str
+    relationship_type: str
+    observed_at_utc: str
+    snapshot_id: str
+    target_post_id: str | None = None
+    action_time_utc: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

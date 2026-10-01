@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 import os
+import uuid
 from dataclasses import fields
 from pathlib import Path
 
@@ -25,6 +26,10 @@ def _atomic_json(path: Path, value: dict) -> None:
 class PostStore:
     def __init__(self, output_dir: str | Path, *, query: dict) -> None:
         self.output_dir = Path(output_dir).expanduser()
+        if (self.output_dir / "network_manifest.json").exists():
+            raise ValueError(
+                "Network snapshots require a separate output directory from post collections"
+            )
         migrate_collection(self.output_dir)
         self._internal = internal_dir(self.output_dir)
         self._jsonl = self._internal / "posts.jsonl"
@@ -48,6 +53,91 @@ class PostStore:
                 if line.strip():
                     post = Post(**json.loads(line))
                     self._posts[post.id] = post
+        self._metrics_path = self._internal / "metric_snapshots.jsonl"
+        self._metrics = {}
+        if self._metrics_path.exists():
+            for line in self._metrics_path.read_text(encoding="utf-8").split("\n"):
+                if line.strip():
+                    row = json.loads(line)
+                    self._metrics[row["snapshot_id"]] = row
+
+    def archive_response(
+        self, payload: dict, *, operation: str, variables: dict
+    ) -> Path:
+        """Keep the complete read response; request credentials are never archived."""
+        raw_dir = self._internal / "raw"
+        raw_dir.mkdir(exist_ok=True)
+        path = raw_dir / (uuid.uuid4().hex + ".json")
+        _atomic_json(path, payload)
+        safe = {
+            k: v
+            for k, v in variables.items()
+            if k.lower()
+            not in {
+                "auth_token",
+                "ct0",
+                "cookies",
+                "authorization",
+                "password",
+                "secret",
+                "bearer_token",
+            }
+        }
+        self.log(
+            operation=operation,
+            variables=safe,
+            raw_path=str(path.relative_to(self.output_dir)),
+            raw_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+            status="response_received",
+        )
+        return path
+
+    def log(self, **record) -> None:
+        with (self._internal / "collection_log.jsonl").open(
+            "a", encoding="utf-8"
+        ) as stream:
+            stream.write(
+                json.dumps({"timestamp": now_utc(), **record}, ensure_ascii=False)
+                + "\n"
+            )
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def _snapshot(self, post: Post) -> None:
+        row = {
+            "post_id": post.id,
+            "retrieved_at_utc": post.captured_at_utc,
+            "time_status": "observed" if post.captured_at_utc else "unknown",
+        }
+        for field in (
+            "like_count",
+            "reply_count",
+            "repost_count",
+            "quote_count",
+            "view_count",
+            "bookmark_count",
+        ):
+            row[field] = getattr(post, field)
+        if all(
+            row[field] is None
+            for field in (
+                "like_count",
+                "reply_count",
+                "repost_count",
+                "quote_count",
+                "view_count",
+                "bookmark_count",
+            )
+        ):
+            return
+        key = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
+        if key not in self._metrics:
+            row["snapshot_id"] = key
+            with self._metrics_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            self._metrics[key] = row
 
     @property
     def count(self) -> int:
@@ -67,6 +157,15 @@ class PostStore:
         added = 0
         with self._jsonl.open("a", encoding="utf-8") as file:
             for post in posts:
+                self._snapshot(post)
+                with (self._internal / "observations.jsonl").open(
+                    "a", encoding="utf-8"
+                ) as observations:
+                    observations.write(
+                        json.dumps(post.to_dict(), ensure_ascii=False) + "\n"
+                    )
+                    observations.flush()
+                    os.fsync(observations.fileno())
                 if post.id in self._posts:
                     continue
                 file.write(json.dumps(post.to_dict(), ensure_ascii=True) + "\n")
@@ -123,10 +222,43 @@ class PostStore:
             writer.writeheader()
             for post in rows:
                 row = post.to_dict()
-                for key in ("media_urls", "outbound_urls", "hashtags", "mentions"):
-                    row[key] = json.dumps(row[key], ensure_ascii=False)
+                for key, value in list(row.items()):
+                    if isinstance(value, (dict, list)):
+                        row[key] = json.dumps(value, ensure_ascii=False)
                 writer.writerow(row)
+        from .tables import _write_csv
+
+        metric_fields = [
+            "snapshot_id",
+            "post_id",
+            "retrieved_at_utc",
+            "time_status",
+            "like_count",
+            "reply_count",
+            "repost_count",
+            "quote_count",
+            "view_count",
+            "bookmark_count",
+        ]
+        if self._metrics:
+            _write_csv(
+                self.output_dir / "metric_snapshots.csv",
+                metric_fields,
+                list(self._metrics.values()),
+            )
+        self.log(
+            operation="finish",
+            query=self.state["query"],
+            complete=complete,
+            reason=reason,
+            pages_fetched=self.state["pages_fetched"],
+        )
         manifest = {
+            **(
+                {"date_scope": self.state["date_scope"]}
+                if "date_scope" in self.state
+                else {}
+            ),
             "query": self.state["query"],
             "post_count": len(rows),
             "pages_fetched": self.state["pages_fetched"],

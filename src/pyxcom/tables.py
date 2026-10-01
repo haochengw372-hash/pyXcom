@@ -45,6 +45,19 @@ _COMMENT = [
     "depth_status",
     "parent_in_dataset",
     "root_in_dataset",
+    "seed_post_id",
+    "seed_relative_depth",
+] + _CONTENT
+_CONTEXT = [
+    "post_id",
+    "author_id",
+    "post_role",
+    "post_type",
+    "root_post_id",
+    "parent_post_id",
+    "depth",
+    "depth_status",
+    "target_post_id",
 ] + _CONTENT
 _INTERACTION = [
     "interaction_id",
@@ -52,6 +65,52 @@ _INTERACTION = [
     "interaction_type",
     "target_post_id",
 ] + _CONTENT
+_EDGE = [
+    "source_post_id",
+    "target_post_id",
+    "source_user_id",
+    "target_user_id",
+    "edge_type",
+    "action_time_utc",
+    "observed_at_utc",
+    "target_post_available",
+    "target_author_resolved",
+    "observation_role",
+]
+
+
+def _post_edges(records: dict[str, Post]) -> list[dict]:
+    edges = []
+    for post in records.values():
+        if post.observation_role == "context":
+            continue
+        relations: tuple[tuple[str, str | None, str | None], ...] = (
+            ("reply", post.in_reply_to_id, post.in_reply_to_user_id),
+            ("quote", post.quoted_post_id, post.quoted_author_id),
+            ("repost", post.reposted_post_id, post.reposted_author_id),
+        )
+        if post.post_role == "repost":
+            relations = (relations[-1],)
+        for kind, target_id, target_author in relations:
+            if not target_id:
+                continue
+            target = records.get(target_id)
+            target_author = target.author_id if target else target_author
+            edges.append(
+                dict(
+                    source_post_id=post.id,
+                    target_post_id=target_id,
+                    source_user_id=post.author_id,
+                    target_user_id=target_author,
+                    edge_type=kind,
+                    action_time_utc=post.created_at_utc,
+                    observed_at_utc=post.captured_at_utc,
+                    target_post_available=target is not None,
+                    target_author_resolved=bool(target_author),
+                    observation_role=post.observation_role,
+                )
+            )
+    return edges
 
 
 def _hash(path: Path) -> str:
@@ -135,6 +194,10 @@ def _depths(records: dict[str, Post]) -> dict[str, tuple[int | None, str]]:
 def export_tables(output_dir: str | Path) -> dict:
     """Write public relational CSV tables at the collection root."""
     directory = Path(output_dir).expanduser()
+    if (directory / "network_manifest.json").exists():
+        raise ValueError(
+            "Post table export cannot overwrite a network snapshot dataset"
+        )
     migrate_collection(directory)
     source = source_path(directory, "posts.jsonl")
     records: dict[str, Post] = {}
@@ -181,7 +244,15 @@ def export_tables(output_dir: str | Path) -> dict:
         }
         for user_id, profile in profiles.items()
     }
-    posts, comments, interactions = [], [], []
+    posts, comments, interactions, contexts = [], [], [], []
+    state_file = source_path(directory, "state.json")
+    collection_state = json.loads(state_file.read_text()) if state_file.exists() else {}
+    seed_id = (
+        collection_state.get("query", {}).get("root_post_id")
+        if collection_state.get("query", {}).get("kind") == "post_comments"
+        else None
+    )
+    seed_depths = collection_state.get("conversation", {}).get("depths", {})
     main_ids = {p.id for p in records.values() if p.post_role == "main"}
     content_ids = {p.id for p in records.values() if p.post_role != "repost"}
     for post in sorted(records.values(), key=lambda p: (p.created_at_utc, p.id)):
@@ -195,6 +266,23 @@ def export_tables(output_dir: str | Path) -> dict:
         }
         data = post.to_dict()
         payload = {key: data[key] for key in _CONTENT}
+        if post.observation_role == "context":
+            depth, status = depths.get(post.id, (None, "not_reply"))
+            contexts.append(
+                {
+                    "post_id": post.id,
+                    "author_id": post.author_id,
+                    "post_role": post.post_role,
+                    "post_type": post.post_type,
+                    "root_post_id": post.conversation_id,
+                    "parent_post_id": post.in_reply_to_id,
+                    "depth": depth,
+                    "depth_status": status,
+                    "target_post_id": post.reposted_post_id,
+                    **payload,
+                }
+            )
+            continue
         if post.post_role == "comment":
             depth, status = depths[post.id]
             comments.append(
@@ -207,6 +295,10 @@ def export_tables(output_dir: str | Path) -> dict:
                     "depth_status": status,
                     "parent_in_dataset": post.in_reply_to_id in content_ids,
                     "root_in_dataset": post.conversation_id in main_ids,
+                    "seed_post_id": seed_id,
+                    "seed_relative_depth": seed_depths.get(post.id)
+                    if seed_id
+                    else None,
                     **payload,
                 }
             )
@@ -231,6 +323,15 @@ def export_tables(output_dir: str | Path) -> dict:
             )
     target = directory
     target.mkdir(exist_ok=True)
+    edges = _post_edges(records)
+    for edge in edges:
+        user_id = edge["target_user_id"]
+        if user_id and user_id not in users:
+            users[user_id] = {
+                **dict.fromkeys(_USER),
+                "user_id": user_id,
+                "profile_available": False,
+            }
     tables = {
         "users.csv": (_USER, list(users.values())),
         "posts.csv": (_POST, posts),
@@ -238,16 +339,55 @@ def export_tables(output_dir: str | Path) -> dict:
     }
     if interactions:
         tables["interactions.csv"] = (_INTERACTION, interactions)
+    if contexts:
+        tables["context_posts.csv"] = (_CONTEXT, contexts)
+    if edges:
+        tables["post_edges.csv"] = (_EDGE, edges)
+    metric_source = source_path(directory, "metric_snapshots.jsonl")
+    if metric_source.exists():
+        metrics = [
+            json.loads(line)
+            for line in metric_source.read_text(encoding="utf-8").split("\n")
+            if line.strip()
+        ]
+        if metrics:
+            metric_fields = [
+                "snapshot_id",
+                "post_id",
+                "retrieved_at_utc",
+                "time_status",
+                "like_count",
+                "reply_count",
+                "repost_count",
+                "quote_count",
+                "view_count",
+                "bookmark_count",
+            ]
+            tables["metric_snapshots.csv"] = (metric_fields, metrics)
     for name, (columns, rows) in tables.items():
         _write_csv(target / name, columns, rows)
     if not interactions:
         (target / "interactions.csv").unlink(missing_ok=True)
+    if not contexts:
+        (target / "context_posts.csv").unlink(missing_ok=True)
+    if not edges:
+        (target / "post_edges.csv").unlink(missing_ok=True)
     manifest: dict = {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "layout_version": "2.0",
         "source_kind": "saved_post_observations",
         "source_sha256": {
             str(source.relative_to(directory)): _hash(source),
+            **(
+                {str(state_file.relative_to(directory)): _hash(state_file)}
+                if state_file.exists()
+                else {}
+            ),
+            **(
+                {str(metric_source.relative_to(directory)): _hash(metric_source)}
+                if metric_source.exists()
+                else {}
+            ),
             **(
                 {str(profiles_path.relative_to(directory)): _hash(profiles_path)}
                 if profiles_path.exists()
@@ -260,11 +400,15 @@ def export_tables(output_dir: str | Path) -> dict:
             "comments": len(comments),
             "interactions": len(interactions),
             "source_records": len(records),
+            **({"context_posts": len(contexts)} if contexts else {}),
         },
         "missing_root_count": sum(not row["root_in_dataset"] for row in comments),
         "missing_parent_count": sum(not row["parent_in_dataset"] for row in comments),
         "unknown_depth_count": sum(row["depth"] is None for row in comments),
         "conversation_coverage": "observed_records_only",
+        "canonical_record_policy": "first_saved_observation_per_id",
+        "metric_policy": "returned_counts_at_observation_time",
+        "edge_count": len(edges),
         "sha256": {name: _hash(target / name) for name in tables},
     }
     collection_path = source_path(directory, "manifest.json")
@@ -279,6 +423,7 @@ def export_tables(output_dir: str | Path) -> dict:
             "oldest_post_utc",
             "newest_post_utc",
             "missing_ids",
+            "date_scope",
         ):
             if key in collection:
                 manifest[key] = collection[key]

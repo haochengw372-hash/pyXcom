@@ -13,6 +13,14 @@ from .storage import PostStore, _atomic_json
 from .validate import finalize_collection, validate_collection
 
 FIELD_GROUPS = {
+    "in_reply_to_user_id": ("关系", "直接回复对象的用户 ID；缺失时保持未知"),
+    "quoted_author_id": ("关系", "被引用帖作者 ID"),
+    "reposted_author_id": ("关系", "被原生转发帖作者 ID"),
+    "reposted_created_at_utc": ("时间与正文", "原帖发布时间；不是转发动作时间"),
+    "raw_json": ("溯源", "完整返回帖子对象；旧记录可能缺失"),
+    "text_source": ("时间与正文", "正文来自 note_tweet 或 legacy_full_text"),
+    "text_complete": ("时间与正文", "正文完整性，无法核验时保持未知"),
+    "observation_role": ("分类", "analysis / seed / context，窗口外祖先不作为分析样本"),
     "id": ("身份", "X 帖子 ID；以字符串保存"),
     "author_id": ("身份", "作者 X ID"),
     "author_handle": ("身份", "作者账号名"),
@@ -69,6 +77,12 @@ def _read_posts(path: Path) -> list[Post]:
 
 def schema_summary(output_dir: str | Path) -> dict:
     output = Path(output_dir).expanduser()
+    if (output / "network_manifest.json").exists() or (
+        output / ".pyxcom" / "networks"
+    ).exists():
+        raise ValueError(
+            "Post schema reports do not apply to network snapshot datasets"
+        )
     posts = _read_posts(source_path(output, "posts.jsonl"))
     post_fields = []
     for item in fields(Post):

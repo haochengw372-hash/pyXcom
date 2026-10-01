@@ -1,7 +1,8 @@
-"""Bounded, resumable traversal of public replies to a root X post."""
+"""Bounded, resumable traversal of public replies to an X post or reply seed."""
 
 import time
 from dataclasses import replace
+from datetime import date
 from typing import TYPE_CHECKING, Iterator
 
 from .errors import ParseError, RateLimitError
@@ -90,6 +91,8 @@ class CommentTraversal:
         max_pages: int | None,
         records: dict[str, Post] | None = None,
         state: dict | None = None,
+        since: str | None = None,
+        until: str | None = None,
     ):
         if max_depth is None:
             raise ValueError("max_depth must be a positive integer")
@@ -102,6 +105,12 @@ class CommentTraversal:
                 isinstance(value, bool) or not isinstance(value, int) or value < 1
             ):
                 raise ValueError(f"{name} must be a positive integer")
+        for bound in (since, until):
+            if bound is not None:
+                date.fromisoformat(bound)
+        if since and until and since >= until:
+            raise ValueError("since must be earlier than until; until is exclusive")
+        self.since, self.until = since, until
         self.client = client
         self.root_id = root_id
         self.max_depth, self.max_comments, self.max_pages = (
@@ -119,14 +128,58 @@ class CommentTraversal:
         self.state.setdefault("profiles", {})
         self.state.setdefault("pagination_warnings", [])
         self.state.setdefault("empty_pages", {})
+        self.state.setdefault(
+            "accepted_ids",
+            [
+                key
+                for key, post in self.records.items()
+                if key != root_id
+                and getattr(post, "observation_role", "analysis") != "context"
+            ],
+        )
+        self.state.setdefault("excluded_ids", [])
+        self.latest_payload: dict | None = None
+        self.latest_request: dict | None = None
+        self.latest_response_number = 0
         self.complete = False
         self.reason = "not_started"
         self.pages_fetched = 0
         self.page_was_fetched = False
 
+    @property
+    def comment_count(self) -> int:
+        """Eligible descendants only; the seed and context do not consume the cap."""
+        return len(self.state["accepted_ids"])
+
+    def _within_window(self, post: Post) -> bool:
+        day = post.created_at_utc[:10]
+        return (self.since is None or day >= self.since) and (
+            self.until is None or day < self.until
+        )
+
+    def _exclude_other_branches(self) -> None:
+        pending = self.state["pending"]
+        excluded = set(self.state["excluded_ids"])
+        conversation = self.state.get("conversation_id", self.root_id)
+        if conversation != self.root_id:
+            excluded.add(conversation)
+        while True:
+            outsiders = {
+                key
+                for key, value in pending.items()
+                if value.get("in_reply_to_id") in excluded
+            }
+            if not outsiders:
+                break
+            excluded.update(outsiders)
+            for key in outsiders:
+                del pending[key]
+        self.state["excluded_ids"] = sorted(excluded)
+
     def _accept_pending(self) -> list[Post]:
         added: list[Post] = []
         pending = self.state["pending"]
+        self._exclude_other_branches()
         while True:
             progressed = False
             for key, value in list(pending.items()):
@@ -140,14 +193,21 @@ class CommentTraversal:
                     del pending[key]
                     progressed = True
                     continue
+                eligible = self._within_window(post)
                 if (
-                    self.max_comments is not None
-                    and len(self.records) - 1 >= self.max_comments
+                    eligible
+                    and self.max_comments is not None
+                    and self.comment_count >= self.max_comments
                 ):
                     return added
+                post = replace(
+                    post, observation_role="analysis" if eligible else "context"
+                )
                 self.records[key] = post
                 self.state["depths"][key] = depth
                 del pending[key]
+                if eligible:
+                    self.state["accepted_ids"].append(key)
                 added.append(post)
                 progressed = True
                 if (
@@ -163,13 +223,21 @@ class CommentTraversal:
     def pages(self) -> Iterator[list[Post]]:
         if self.root_id not in self.records:
             root = self.client.get_post(self.root_id)
-            if root.in_reply_to_id or root.reposted_post_id:
+            if root.reposted_post_id:
                 raise ValueError(
-                    "post_id_or_url must identify a main post, not a reply or repost"
+                    "post_id_or_url must identify an original or reply, not a repost"
                 )
+            root = replace(root, observation_role="seed")
             self.records[root.id] = root
             self.page_was_fetched = False
             yield [root]
+        seed = self.records[self.root_id]
+        self.state.setdefault("conversation_id", seed.conversation_id or seed.id)
+        if (
+            seed.in_reply_to_id
+            and seed.in_reply_to_id not in self.state["excluded_ids"]
+        ):
+            self.state["excluded_ids"].append(seed.in_reply_to_id)
         while True:
             self.page_was_fetched = False
             ready = self._accept_pending()
@@ -177,7 +245,7 @@ class CommentTraversal:
                 yield ready
             if (
                 self.max_comments is not None
-                and len(self.records) - 1 >= self.max_comments
+                and self.comment_count >= self.max_comments
             ):
                 self.reason = "comment_limit"
                 return
@@ -200,6 +268,11 @@ class CommentTraversal:
                 self.state["rate_reset_at"] = exc.reset_at
                 self.reason = "rate_limited"
                 return
+            self.latest_payload = payload
+            self.latest_response_number += 1
+            self.latest_request = {"focalTweetId": focal}
+            if cursor is not None:
+                self.latest_request["cursor"] = cursor
             posts, cursors, profiles = parse_conversation(payload)
             self.state.pop("rate_reset_at", None)
             self.state["queue"].pop(0)
@@ -208,9 +281,10 @@ class CommentTraversal:
             relevant = [
                 p
                 for p in posts
-                if p.conversation_id == self.root_id
+                if p.conversation_id == self.state["conversation_id"]
                 and p.in_reply_to_id
                 and p.id not in self.records
+                and p.id not in self.state["excluded_ids"]
             ]
             for post in relevant:
                 self.state["pending"][post.id] = replace(

@@ -15,6 +15,12 @@ from .validate_tables import validate_tables
 def finalize_collection(output_dir: str | Path) -> CollectionResult:
     """Rebuild CSV, hashes, and report after an interrupted collection."""
     output = Path(output_dir).expanduser()
+    if (output / "network_manifest.json").exists() or (
+        output / ".pyxcom" / "networks"
+    ).exists():
+        raise ValueError(
+            "Resume network snapshots with the matching save_followers/save_following/save_post_reposters method; finalize_collection handles post datasets"
+        )
     state = json.loads((source_path(output, "state.json")).read_text(encoding="utf-8"))
     store = PostStore(output, query=state["query"])
     profiles_path = source_path(output, "profiles.json")
@@ -52,11 +58,35 @@ def finalize_collection(output_dir: str | Path) -> CollectionResult:
 
 def validate_collection(output_dir: str | Path) -> dict:
     output = Path(output_dir).expanduser()
+    if (output / "network_manifest.json").exists() or (
+        output / ".pyxcom" / "networks"
+    ).exists():
+        from .networks import validate_network_collection
+
+        return validate_network_collection(output)
     manifest = json.loads(
         (source_path(output, "manifest.json")).read_text(encoding="utf-8")
     )
     rows = []
     errors: list[str] = []
+    log_path = source_path(output, "collection_log.jsonl")
+    if log_path.exists():
+        for line in log_path.read_text(encoding="utf-8").split("\n"):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+                if not record.get("raw_path"):
+                    continue
+                raw_path = (output / record["raw_path"]).resolve()
+                if not raw_path.is_relative_to(source_path(output, "raw").resolve()):
+                    errors.append("invalid_raw_archive_path")
+                elif not raw_path.is_file() or hashlib.sha256(
+                    raw_path.read_bytes()
+                ).hexdigest() != record.get("raw_sha256"):
+                    errors.append("raw_archive_hash_mismatch:" + record["raw_path"])
+            except (ValueError, TypeError, OSError, KeyError):
+                errors.append("invalid_collection_log_record")
     for number, line in enumerate(
         (source_path(output, "posts.jsonl")).read_text(encoding="utf-8").split("\n"), 1
     ):

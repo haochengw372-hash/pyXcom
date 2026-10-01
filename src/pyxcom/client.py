@@ -8,6 +8,8 @@ from datetime import date
 from pathlib import Path
 from typing import Callable, Iterator
 
+from .discovery import DiscoveryMixin
+from .networks import NetworkMixin
 from .auth import load_x_cookies
 from .errors import APIError, RateLimitError
 from .layout import child_dir, migrate_collection, source_path
@@ -61,7 +63,7 @@ def _within(post: Post, since: str | None, until: str | None) -> bool:
     return (since is None or day >= since) and (until is None or day < until)
 
 
-class XClient:
+class XClient(DiscoveryMixin, NetworkMixin):
     """Read public X data using a manually logged-in Chrome or Edge session.
 
     No browser is launched or controlled. Cookies are read into memory and sent
@@ -281,6 +283,15 @@ class XClient:
             except RateLimitError as exc:
                 store.state["rate_reset_at"] = exc.reset_at
                 return store.finish(complete=False, reason="rate_limited")
+            store.archive_response(
+                payload,
+                operation="user_timeline",
+                variables={
+                    "userId": profile.id,
+                    "timeline": timeline,
+                    "cursor": cursor,
+                },
+            )
             authored = [
                 post
                 for post in timeline_primary_posts(payload, captured_at_utc=now_utc())
@@ -801,6 +812,8 @@ class XClient:
         max_depth: int = 2,
         max_comments: int | None = 100,
         max_pages: int | None = 20,
+        since: str | None = None,
+        until: str | None = None,
     ) -> Iterator[Post]:
         """Stream other-user and self replies, bounded by depth and total comments."""
         from .comments import CommentTraversal
@@ -811,9 +824,15 @@ class XClient:
             max_depth=max_depth,
             max_comments=max_comments,
             max_pages=max_pages,
+            since=since,
+            until=until,
         )
         for page in traversal.pages():
-            yield from (post for post in page if post.in_reply_to_id)
+            yield from (
+                post
+                for post in page
+                if post.in_reply_to_id and post.observation_role == "analysis"
+            )
         if traversal.reason == "rate_limited":
             raise RateLimitError(
                 "X rate-limited comment collection",
@@ -827,6 +846,8 @@ class XClient:
         max_depth: int = 2,
         max_comments: int | None = 100,
         max_pages: int | None = 20,
+        since: str | None = None,
+        until: str | None = None,
     ) -> list[Post]:
         """Return observed replies to one main post, including multiple levels."""
         return list(
@@ -835,6 +856,8 @@ class XClient:
                 max_depth=max_depth,
                 max_comments=max_comments,
                 max_pages=max_pages,
+                since=since,
+                until=until,
             )
         )
 
@@ -846,6 +869,8 @@ class XClient:
         max_depth: int = 2,
         max_comments: int | None = 100,
         max_pages: int | None = 20,
+        since: str | None = None,
+        until: str | None = None,
     ) -> CollectionResult:
         """Save a root post, its reply tree and observed author profiles; resume safely."""
         from .comments import CommentTraversal
@@ -858,6 +883,8 @@ class XClient:
             max_depth=max_depth,
             max_comments=max_comments,
             max_pages=max_pages,
+            since=since,
+            until=until,
         )
         store = PostStore(
             output_dir,
@@ -865,6 +892,7 @@ class XClient:
                 "kind": "post_comments",
                 "root_post_id": root_id,
                 "max_depth": max_depth,
+                **({"since": since, "until": until} if since or until else {}),
             },
         )
         if store.complete:
@@ -875,6 +903,8 @@ class XClient:
             max_depth=max_depth,
             max_comments=max_comments,
             max_pages=max_pages,
+            since=since,
+            until=until,
             records=store._posts,
             state=store.state.setdefault("conversation", {}),
         )
@@ -888,11 +918,33 @@ class XClient:
             }
             _atomic_json(source_path(output_dir, "profiles.json"), profiles)
 
+        archived_response_number = 0
         try:
             for page in traversal.pages():
+                if traversal.latest_response_number > archived_response_number:
+                    assert (
+                        traversal.latest_payload is not None
+                        and traversal.latest_request is not None
+                    )
+                    store.archive_response(
+                        traversal.latest_payload,
+                        operation="TweetDetail",
+                        variables=traversal.latest_request,
+                    )
+                    archived_response_number = traversal.latest_response_number
                 save_profiles()
                 store.append_page(page, None, count_page=traversal.page_was_fetched)
         except Exception:
+            if traversal.latest_response_number > archived_response_number:
+                assert (
+                    traversal.latest_payload is not None
+                    and traversal.latest_request is not None
+                )
+                store.archive_response(
+                    traversal.latest_payload,
+                    operation="TweetDetail",
+                    variables=traversal.latest_request,
+                )
             save_profiles()
             store.finish(complete=False, reason="interrupted_or_error")
             raise

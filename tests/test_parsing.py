@@ -55,6 +55,10 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(post.author_handle, "sample")
         self.assertEqual(post.hashtags, ["AI"])
 
+    def test_missing_verification_is_unknown_not_false(self):
+        profile = parse_profile({"rest_id": "123", "core": {"screen_name": "sample"}})
+        self.assertIsNone(profile.verified)
+
     def test_timeline_dedup_and_bottom_cursor(self):
         tweet = {
             "rest_id": "9876543210",

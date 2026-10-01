@@ -10,6 +10,7 @@ import httpx
 from .errors import APIError, RateLimitError
 from .models import Post, Profile
 from .parse import parse_post, parse_profile, single_post
+from .assets import lazy_operation_assets
 
 _MAIN_SCRIPT = re.compile(
     r"https://abs\.twimg\.com/responsive-web/client-web/main\.[^\"\s<>]+\.js"
@@ -43,16 +44,21 @@ class XTransport:
         self._assets = httpx.Client(proxy=proxy, timeout=timeout, follow_redirects=True)
         self._operations: dict[str, str] = {}
         self._bearer: str | None = None
+        self._homepage_html = ""
+        self._main_asset_url = ""
+        self._lazy_attempted: set[str] = set()
 
     def close(self) -> None:
         self._x.close()
         self._assets.close()
 
-    def _get(self, client: httpx.Client, url: str, **kwargs) -> httpx.Response:
+    def _request(
+        self, client: httpx.Client, method: str, url: str, **kwargs
+    ) -> httpx.Response:
         """Retry transient transport/5xx errors, then surface a safe message."""
         for attempt in range(3):
             try:
-                response = client.get(url, **kwargs)
+                response = client.request(method, url, **kwargs)
             except httpx.RequestError as exc:
                 if attempt == 2:
                     raise APIError(
@@ -63,6 +69,12 @@ class XTransport:
                     return response
             time.sleep(2**attempt)
         raise APIError("Network retry loop ended unexpectedly")
+
+    def _get(self, client: httpx.Client, url: str, **kwargs) -> httpx.Response:
+        return self._request(client, "GET", url, **kwargs)
+
+    def _post_read(self, client: httpx.Client, url: str, **kwargs) -> httpx.Response:
+        return self._request(client, "POST", url, **kwargs)
 
     def discover(self, *, refresh: bool = False) -> None:
         if self._operations and not refresh:
@@ -86,6 +98,25 @@ class XTransport:
             raise APIError("X web bundle no longer exposes the expected read routes")
         self._operations = operations
         self._bearer = bearer.group(1)
+        self._homepage_html = response.text
+        self._main_asset_url = match.group(0)
+        self._lazy_attempted.clear()
+
+    def _discover_lazy_operation(self, operation: str) -> None:
+        if operation in self._lazy_attempted:
+            return
+        self._lazy_attempted.add(operation)
+        for url in lazy_operation_assets(
+            self._homepage_html, self._main_asset_url, operation
+        ):
+            response = self._get(self._assets, url)
+            if response.status_code != 200:
+                continue
+            self._operations.update(
+                {name: query_id for query_id, name in _OPERATION.findall(response.text)}
+            )
+            if operation in self._operations:
+                return
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -112,6 +143,8 @@ class XTransport:
     ) -> dict:
         self.discover()
         if operation not in self._operations:
+            self._discover_lazy_operation(operation)
+        if operation not in self._operations:
             raise APIError(f"X web bundle has no {operation} operation")
         params = {
             "variables": json.dumps(variables, separators=(",", ":")),
@@ -121,7 +154,19 @@ class XTransport:
             params["fieldToggles"] = json.dumps(field_toggles, separators=(",", ":"))
         query_id = self._operations[operation]
         url = f"https://x.com/i/api/graphql/{query_id}/{operation}"
-        response = self._get(self._x, url, params=params, headers=self._headers())
+        if operation in {"SearchTimeline", "Followers", "Retweeters"}:
+            # Current web read queries use POST; no mutation operation is sent here.
+            body = {
+                "queryId": query_id,
+                "variables": variables,
+                "features": features or {},
+                "fieldToggles": field_toggles or {},
+            }
+            if field_toggles is not None:
+                body["fieldToggles"] = field_toggles
+            response = self._post_read(self._x, url, json=body, headers=self._headers())
+        else:
+            response = self._get(self._x, url, params=params, headers=self._headers())
         if response.status_code == 429:
             reset = response.headers.get("x-rate-limit-reset")
             raise RateLimitError(
@@ -129,11 +174,16 @@ class XTransport:
                 int(reset) if reset and reset.isdigit() else None,
             )
         if response.status_code == 404 and not response.content:
-            # X also uses an empty 404 when a read route is temporarily limited.
+            # A 404 is not evidence of an exhausted quota when requests remain.
             reset = response.headers.get("x-rate-limit-reset")
-            raise RateLimitError(
-                f"X returned an empty 404 for {operation}; retry after the rate window",
-                int(reset) if reset and reset.isdigit() else None,
+            remaining = response.headers.get("x-rate-limit-remaining")
+            if remaining == "0":
+                raise RateLimitError(
+                    f"X quota exhausted for {operation}",
+                    int(reset) if reset and reset.isdigit() else None,
+                )
+            raise APIError(
+                f"X returned an empty 404 for {operation}; the route or read request may be incompatible"
             )
         if response.status_code != 200:
             raise APIError(f"X returned HTTP {response.status_code} for {operation}")
@@ -217,14 +267,76 @@ class XTransport:
             field_toggles={"withArticleRichContentState": False},
         )
 
+    def search_page(
+        self,
+        query: str,
+        cursor: str | None = None,
+        *,
+        product: str = "Latest",
+        count: int = 20,
+    ) -> dict:
+        """Read native X search; terms/operators are interpreted by X, not locally."""
+        if not query.strip() or product not in {"Latest", "Top"}:
+            raise ValueError("A nonempty query and Latest/Top product are required")
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or not 1 <= count <= 100
+        ):
+            raise ValueError("count must be an integer from 1 to 100")
+        variables = {
+            "rawQuery": query,
+            "count": count,
+            "querySource": "typed_query",
+            "product": product,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+        return self.graphql("SearchTimeline", variables, features=TWEET_FEATURES)
+
+    def relationship_page(
+        self, user_id: str, *, kind: str, cursor: str | None = None
+    ) -> dict:
+        """Followers and following are distinct directed-list read operations."""
+        if kind not in {"followers", "following"} or not str(user_id).isdigit():
+            raise ValueError("kind must be followers/following and user_id numeric")
+        variables = {
+            "userId": str(user_id),
+            "count": 20,
+            "includePromotedContent": False,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+        return self.graphql(
+            "Followers" if kind == "followers" else "Following",
+            variables,
+            features=TWEET_FEATURES,
+        )
+
+    def reposters_page(self, post_id: str, cursor: str | None = None) -> dict:
+        """Return the visible reposter-user list, not timestamped repost activities."""
+        if not str(post_id).isdigit():
+            raise ValueError("post_id must be numeric")
+        variables = {
+            "tweetId": str(post_id),
+            "count": 20,
+            "includePromotedContent": True,
+            "enableRanking": False,
+        }
+        if cursor:
+            variables["cursor"] = cursor
+        return self.graphql("Retweeters", variables, features=TWEET_FEATURES)
+
     def user_timeline_page(
         self, user_id: str, *, timeline: str, cursor: str | None = None
     ) -> dict:
-        if timeline not in {"posts", "replies"}:
-            raise ValueError("timeline must be posts or replies")
-        operation = (
-            "UserOriginalsTimeline" if timeline == "posts" else "UserRepliesTimeline"
-        )
+        if timeline not in {"posts", "replies", "reposts"}:
+            raise ValueError("timeline must be posts, replies, or reposts")
+        operation = {
+            "posts": "UserOriginalsTimeline",
+            "replies": "UserRepliesTimeline",
+            "reposts": "UserTweets",
+        }[timeline]
         variables = {
             "userId": user_id,
             "count": 20,

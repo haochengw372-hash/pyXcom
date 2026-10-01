@@ -65,7 +65,9 @@ def parse_profile(data: dict, *, captured_at_utc: str | None = None) -> Profile:
         ),
         posts_count=_count(legacy.get("statuses_count", tweet_counts.get("tweets"))),
         media_count=_count(legacy.get("media_count", tweet_counts.get("media_tweets"))),
-        verified=bool(result.get("is_blue_verified") or legacy.get("verified")),
+        verified=bool(result.get("is_blue_verified") or legacy.get("verified"))
+        if "is_blue_verified" in result or "verified" in legacy
+        else None,
         url=f"https://x.com/{handle}",
         captured_at_utc=captured_at_utc,
     )
@@ -119,7 +121,26 @@ def parse_post(data: dict, *, captured_at_utc: str | None = None) -> Post | None
         for item in entities.get("user_mentions", [])
         if item.get("screen_name")
     ]
-    repost_result = legacy.get("retweeted_status_result") or {}
+    repost_result = (
+        legacy.get("retweeted_status_result")
+        or data.get("retweeted_status_result")
+        or {}
+    )
+    repost = repost_result.get("result") or {}
+    repost = repost.get("tweet", repost)
+    quoted = data.get("quoted_status_result") or {}
+    quoted = (
+        quoted.get("result") or (quoted.get("tweet_results") or {}).get("result") or {}
+    )
+    quoted = quoted.get("tweet", quoted)
+
+    def referenced_author(result: dict) -> str | None:
+        author = (result.get("core") or {}).get("user_results", {}).get("result") or {}
+        identifier = (result.get("legacy") or {}).get("user_id_str") or author.get(
+            "rest_id"
+        )
+        return str(identifier) if identifier else None
+
     return Post(
         id=str(post_id),
         author_id=str(author_id),
@@ -132,8 +153,8 @@ def parse_post(data: dict, *, captured_at_utc: str | None = None) -> Post | None
         language=legacy.get("lang"),
         conversation_id=legacy.get("conversation_id_str"),
         in_reply_to_id=legacy.get("in_reply_to_status_id_str"),
-        quoted_post_id=legacy.get("quoted_status_id_str"),
-        reposted_post_id=(repost_result.get("result") or {}).get("rest_id"),
+        quoted_post_id=legacy.get("quoted_status_id_str") or quoted.get("rest_id"),
+        reposted_post_id=repost.get("rest_id"),
         reply_count=_count(legacy.get("reply_count")),
         repost_count=_count(legacy.get("retweet_count")),
         like_count=_count(legacy.get("favorite_count")),
@@ -145,6 +166,17 @@ def parse_post(data: dict, *, captured_at_utc: str | None = None) -> Post | None
         hashtags=list(dict.fromkeys(hashtags)),
         mentions=list(dict.fromkeys(mentions)),
         captured_at_utc=captured_at_utc,
+        in_reply_to_user_id=str(legacy["in_reply_to_user_id_str"])
+        if legacy.get("in_reply_to_user_id_str")
+        else None,
+        quoted_author_id=referenced_author(quoted),
+        reposted_author_id=referenced_author(repost),
+        reposted_created_at_utc=_utc((repost.get("legacy") or {}).get("created_at")),
+        raw_json=data,
+        text_source="note_tweet" if note.get("text") else "legacy_full_text",
+        text_complete=True
+        if note.get("text")
+        else (False if legacy.get("truncated") else None),
     )
 
 

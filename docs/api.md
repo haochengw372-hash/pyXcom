@@ -1,4 +1,6 @@
-# Public API — pyXcom 0.6
+# Public API — pyXcom 0.7.0
+
+The native discovery and network methods have passed offline tests and bounded authenticated live endpoint tests. These tests verify the exercised acquisition paths, not complete historical or network coverage.
 
 Import `XClient`, `Profile`, `Post`, `CollectionResult`, `PyXcomError`, `AuthenticationError`, `APIError`, and `RateLimitError` from `pyxcom`.
 
@@ -50,23 +52,26 @@ save_users_activity(handles, output_dir, *, since, until, pages_per_round=5,
 
 `user_posts` defaults to original/quote main posts. `user_replies` returns authored replies, including self-replies. Neither is an API to retrieve a main post's entire received comment tree. `timeline` is a compatibility option for selecting the source stream.
 
-## Comments received by a main post
+## Comments received by a post or reply
 
 ```python
 iter_post_comments(post_id_or_url: str, *, max_depth: int = 2,
                    max_comments: int | None = 100,
-                   max_pages: int | None = 20) -> Iterator[Post]
+                   max_pages: int | None = 20,
+                   since: str | None = None, until: str | None = None) -> Iterator[Post]
 get_post_comments(post_id_or_url: str, *, max_depth: int = 2,
                   max_comments: int | None = 100,
-                  max_pages: int | None = 20) -> list[Post]
+                  max_pages: int | None = 20,
+                  since: str | None = None, until: str | None = None) -> list[Post]
 save_post_comments(post_id_or_url: str, output_dir: str | Path, *,
                    max_depth: int = 2, max_comments: int | None = 100,
-                   max_pages: int | None = 20) -> CollectionResult
+                   max_pages: int | None = 20,
+                   since: str | None = None, until: str | None = None) -> CollectionResult
 ```
 
-These methods query the main post's conversation and expand replies from all visible authors. They differ from `*_user_replies`, which fetch only one account's authored replies. `get` and `iter` return comments only; `save` includes the root in `posts.csv`, profiles in `users.csv`, comments in `comments.csv`, and private traversal state for resume.
+These methods expand descendants of the seed from all visible authors, including when the seed itself is a reply. They differ from `*_user_replies`, which fetch only one account's authored replies. `get` and `iter` return descendants only; `save` preserves the seed in its proper main/comment table, profiles in `users.csv`, comments in `comments.csv`, and private traversal state for resume. Ancestor context is retained in `context_posts.csv` and is not counted as descendants.
 
-Depth is relative to the main post (direct replies=1). Comment cap is exact and cumulative per dataset; page cap applies to each call. A rate-limited save preserves its queue with `complete=false`; memory/iterator methods raise `RateLimitError`. Network/parse failures save a partial checkpoint and raise. Repeating a save with larger comment/page budgets resumes it; changing root/depth is rejected to protect query consistency. Completion only means visible traversal within the requested depth ended, not an exhaustive historical thread.
+Traversal depth is relative to the seed (direct replies=1), recorded as `seed_post_id` and `seed_relative_depth`. Actual platform `root_post_id`, `parent_post_id` and `depth` remain separate; missing ancestors can leave actual `depth` unresolved. UTC `since`/`until` filter returned descendants while preserving traversal context. Comment cap is exact and cumulative per dataset; page cap applies to each call. A rate-limited save preserves its queue with `complete=false`; memory/iterator methods raise `RateLimitError`. Network/parse failures save a partial checkpoint and raise. Repeating a save with larger comment/page budgets resumes it; changing seed/depth/date scope requires a separate dataset. Completion only means visible traversal within the requested depth ended, not an exhaustive historical thread. CLI comment/page caps accept `all` for Python `None`; depth must remain a positive integer.
 
 ## Keyword search
 
@@ -81,12 +86,69 @@ save_search_posts(keyword, output_dir, *, handle=None, since=None, until=None,
 
 `keyword: str`, `handle: str | None`. Direct search requires a handle and matches literal text without case sensitivity across that account's main posts and replies. Cross-account discovery requires constructor `mirror_base`. `max_pages` applies per stream for direct search.
 
+## Native discovery
+
+```python
+iter_search_query(query, *, since=None, until=None, max_pages=None, limit=None) -> Iterator[Post]
+get_search_query(query, *, since=None, until=None, max_pages=None, limit=None) -> list[Post]
+save_search_query(query, output_dir, *, since=None, until=None,
+                  max_pages=None, limit=None) -> CollectionResult
+
+iter_post_quotes(post_id_or_url, *, since=None, until=None,
+                 max_pages=None, limit=None) -> Iterator[Post]
+get_post_quotes(post_id_or_url, *, since=None, until=None,
+                max_pages=None, limit=None) -> list[Post]
+save_post_quotes(post_id_or_url, output_dir, *, since=None, until=None,
+                 max_pages=None, limit=None) -> CollectionResult
+
+iter_user_reposts(handle, *, since=None, until=None,
+                  max_pages=None, limit=None) -> Iterator[Post]
+get_user_reposts(handle, *, since=None, until=None,
+                 max_pages=None, limit=None) -> list[Post]
+save_user_reposts(handle, output_dir, *, since=None, until=None,
+                  max_pages=None, limit=None) -> CollectionResult
+```
+
+All options are explicit and keyword-only. Dates are inclusive/exclusive UTC dates; budgets are positive integers or `None`. Native search uses X Latest, preserves query operators, and does not use the mirror. `*_post_quotes` discovers candidates using `quoted_tweet_id:` and verifies the returned target ID. Its result is a visible search sample, not the complete quote population. `*_user_reposts` parses visible repost wrappers in the account timeline, preserving the action ID/time and original target ID/time; it cannot infer missing reposts. If X returns flattened originals instead of wrappers, action times cannot be recovered; the save reports incomplete `repost_activity_unavailable` rather than substituting original publication times.
+
+Saved discovery queries retain original/effective query provenance, raw response pages and resumable cursors. Save scopes cannot be changed within the same directory. Use `complete` and `reason` to report caps, source end, rate limits or stalled pagination. A visible source end does not establish historical exhaustiveness.
+
+## Network lists and snapshots
+
+```python
+iter_followers(user_id, *, max_pages=None, limit=None) -> Iterator[Profile]
+get_followers(user_id, *, max_pages=None, limit=None) -> list[Profile]
+save_followers(user_id, output_dir, *, max_pages=None, limit=None,
+               snapshot_id=None) -> CollectionResult
+
+iter_following(user_id, *, max_pages=None, limit=None) -> Iterator[Profile]
+get_following(user_id, *, max_pages=None, limit=None) -> list[Profile]
+save_following(user_id, output_dir, *, max_pages=None, limit=None,
+               snapshot_id=None) -> CollectionResult
+
+iter_post_reposters(post_id_or_url, *, max_pages=None, limit=None) -> Iterator[Profile]
+get_post_reposters(post_id_or_url, *, max_pages=None, limit=None) -> list[Profile]
+save_post_reposters(post_id_or_url, output_dir, *, max_pages=None, limit=None,
+                    snapshot_id=None) -> CollectionResult
+```
+
+`user_id` is a numeric ID string, resolved with `get_user(handle).id`. Network methods have no historical date filter. Saves write `follow_edges.csv` or `reposters.csv`, `users.csv`, `user_snapshots.csv`, and `network_manifest.json`. Network and post collections must use separate output directories to protect their different table layouts. `CollectionResult.post_count` is the observed user count for these methods. Follow edges point follower → followed account. Reposter edges point reposter → original author with `target_post_id`; `action_time_utc` remains unknown because the user list does not return repost activity times. Discovery/network CLI budgets accept `all` for Python `None`.
+
+`snapshot_id` accepts 1–128 letters, digits, underscores or hyphens. Without it, a save resumes a recoverable unfinished snapshot for that source, or creates a new snapshot after completion or a terminal bad cursor. Reusing an explicit completed ID returns that observation. History and raw pages remain under `.pyxcom/networks/`; the network manifest records completion and stop reasons per snapshot. `get`/`iter` raise `APIError`, `ParseError` or `RateLimitError` on source failures and set `last_network_collection`; budget stops return the prefix. Saves return incomplete status with resumable checkpoints for recoverable failures. Snapshot time is the time of observation, not relationship creation time. Present-day follower/following lists cannot backfill historical follow networks.
+
+## Observation archives
+
+Saved post collections retain page responses under `.pyxcom/raw/` and collection provenance under `.pyxcom/collection_log.jsonl`; network responses are kept under each snapshot state. Re-observing a post preserves returned engagement-count history in `metric_snapshots.csv` and `.pyxcom/metric_snapshots.jsonl`, with observations retained in `.pyxcom/observations.jsonl`, while public post tables remain deduplicated by ID. Unknown counts remain unavailable, not zero. A repeated observation does not reconstruct an earlier historical metric. Raw archives contain platform payloads, not request cookies or authorization headers.
+
+`post_edges.csv` exports observed reply, quote and repost edges when present. Columns are `source_post_id`, `target_post_id`, `source_user_id`, `target_user_id`, `edge_type`, `action_time_utc`, `observed_at_utc`, `target_post_available`, `target_author_resolved` and `observation_role`. Edges point from the acting user/post to the target. Unavailable targets remain in the table; unresolved target user IDs stay empty with `target_author_resolved=false`. Known but otherwise unobserved target authors have stub user rows (`profile_available=false`). Context-only records do not generate source edges. Relationship, context and metric exports are conditional on corresponding observations being present.
+
 ## Offline dataset functions
 
 ```python
 export_tables(output_dir: str | Path) -> dict
 validate_tables(output_dir: str | Path) -> dict
 validate_collection(output_dir: str | Path) -> dict
+validate_network_collection(output_dir: str | Path) -> dict
 finalize_collection(output_dir: str | Path) -> CollectionResult
 schema_summary(output_dir: str | Path) -> dict
 write_schema_report(output_dir: str | Path) -> dict
@@ -94,6 +156,8 @@ apply_role_schema(output_dir: str | Path) -> dict
 ```
 
 Export/finalization migrate legacy files with backups and regenerate public tables. Validation never fetches X data. `validate_collection` checks internal observations and public tables; `validate_tables` checks normalized relationships, source/file hashes and counts. Reports describe missing ancestry explicitly. `schema_summary` describes the internal standard Post/Profile fields, not only the normalized table columns.
+
+Post export/finalization/schema helpers operate on post datasets. `validate_collection` automatically recognizes network datasets; `validate_network_collection` explicitly verifies network snapshot hashes, directions and provenance. To resume or regenerate network exports, repeat the corresponding network `save_*` call.
 
 ## Backward-compatible names
 

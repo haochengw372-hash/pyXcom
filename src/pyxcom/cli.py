@@ -13,6 +13,25 @@ from .tables import export_tables
 from .validate import finalize_collection, validate_collection
 
 
+def _budget(value: str) -> int | None:
+    if value.lower() == "all":
+        return None
+    try:
+        budget = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("use a positive integer or 'all'") from exc
+    if budget <= 0:
+        raise argparse.ArgumentTypeError("use a positive integer or 'all'")
+    return budget
+
+
+def _depth(value: str) -> int:
+    budget = _budget(value)
+    if budget is None:
+        raise argparse.ArgumentTypeError("depth must be a positive integer")
+    return budget
+
+
 def _common_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--browser", choices=("chrome", "edge"), default="chrome")
@@ -159,15 +178,48 @@ def build_parser() -> argparse.ArgumentParser:
     comments = commands.add_parser(
         "post-comments",
         parents=[common],
-        help="Collect replies below one main post, including nested replies",
+        help="Collect replies below a post or reply, including nested replies",
     )
     comments.add_argument("post_id_or_url")
-    comments.add_argument("--max-depth", type=int, default=2)
-    comments.add_argument("--max-comments", type=int, default=100)
-    comments.add_argument("--max-pages", type=int, default=20)
+    comments.add_argument("--max-depth", type=_depth, default=2)
+    comments.add_argument("--max-comments", type=_budget, default=100)
+    comments.add_argument("--max-pages", type=_budget, default=20)
+    comments.add_argument("--since", help="Inclusive UTC date YYYY-MM-DD")
+    comments.add_argument("--until", help="Exclusive UTC date YYYY-MM-DD")
     comments.add_argument(
         "--output-dir", "--output", dest="output", type=Path, required=True
     )
+    for name, argument, help_text in (
+        ("search-query", "query", "Save native X Latest search results"),
+        ("post-quotes", "post_id_or_url", "Save visible posts quoting one post"),
+        ("user-reposts", "handle", "Save native repost activities by one account"),
+    ):
+        command = commands.add_parser(name, parents=[common], help=help_text)
+        command.add_argument(argument)
+        command.add_argument("--since", help="Inclusive UTC date YYYY-MM-DD")
+        command.add_argument("--until", help="Exclusive UTC date YYYY-MM-DD")
+        command.add_argument("--max-pages", type=_budget)
+        command.add_argument("--limit", type=_budget)
+        command.add_argument(
+            "--output-dir", "--output", dest="output", type=Path, required=True
+        )
+    for name, argument, help_text in (
+        ("user-followers", "user_id", "Save observed followers of a user ID"),
+        ("user-following", "user_id", "Save observed accounts followed by a user ID"),
+        (
+            "post-reposters",
+            "post_id_or_url",
+            "Save visible reposters; action times are unknown",
+        ),
+    ):
+        command = commands.add_parser(name, parents=[common], help=help_text)
+        command.add_argument(argument)
+        command.add_argument("--max-pages", type=_budget)
+        command.add_argument("--limit", type=_budget)
+        command.add_argument("--snapshot-id")
+        command.add_argument(
+            "--output-dir", "--output", dest="output", type=Path, required=True
+        )
     return parser
 
 
@@ -235,6 +287,52 @@ def main(argv: list[str] | None = None) -> int:
                     max_depth=args.max_depth,
                     max_comments=args.max_comments,
                     max_pages=args.max_pages,
+                    since=args.since,
+                    until=args.until,
+                )
+                print(json.dumps(result.to_dict(), ensure_ascii=False))
+            elif args.command in ("search-query", "post-quotes", "user-reposts"):
+                method, value = {
+                    "search-query": ("save_search_query", getattr(args, "query", None)),
+                    "post-quotes": (
+                        "save_post_quotes",
+                        getattr(args, "post_id_or_url", None),
+                    ),
+                    "user-reposts": (
+                        "save_user_reposts",
+                        getattr(args, "handle", None),
+                    ),
+                }[args.command]
+                result = getattr(client, method)(
+                    value,
+                    args.output,
+                    since=args.since,
+                    until=args.until,
+                    max_pages=args.max_pages,
+                    limit=args.limit,
+                )
+                print(json.dumps(result.to_dict(), ensure_ascii=False))
+            elif args.command in ("user-followers", "user-following", "post-reposters"):
+                method, value = {
+                    "user-followers": (
+                        "save_followers",
+                        getattr(args, "user_id", None),
+                    ),
+                    "user-following": (
+                        "save_following",
+                        getattr(args, "user_id", None),
+                    ),
+                    "post-reposters": (
+                        "save_post_reposters",
+                        getattr(args, "post_id_or_url", None),
+                    ),
+                }[args.command]
+                result = getattr(client, method)(
+                    value,
+                    args.output,
+                    max_pages=args.max_pages,
+                    limit=args.limit,
+                    snapshot_id=args.snapshot_id,
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))
             elif args.command == "profile":

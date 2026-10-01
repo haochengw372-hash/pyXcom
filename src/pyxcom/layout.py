@@ -80,6 +80,12 @@ def migrate_collection(output: str | Path) -> Path:
     Normalized root tables are never mistaken for legacy mixed observations.
     """
     directory = Path(output).expanduser()
+    if (directory / "network_manifest.json").exists() or (
+        directory / ".pyxcom" / "networks"
+    ).exists():
+        raise ValueError(
+            "Network snapshots have a separate layout; post migration cannot modify them"
+        )
     private = internal_dir(directory)
     private.mkdir(parents=True, exist_ok=True)
     backup = private / "legacy"

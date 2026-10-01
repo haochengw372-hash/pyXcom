@@ -85,6 +85,7 @@ class PublicAPITests(unittest.TestCase):
     def test_replies_exclude_context_and_save_clean_dataset(self):
         client = self.client()
         self.addCleanup(client.close)
+        client._x.user_timeline_page.return_value = {"data": {}}
         client.get_user = Mock(return_value=Profile("9", "alice", "Alice"))
         root = Post(
             "1234567890", "9", "alice", "2026-01-01T00:00:00+00:00", "root", "url"

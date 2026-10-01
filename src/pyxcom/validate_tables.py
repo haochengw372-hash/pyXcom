@@ -23,6 +23,13 @@ def validate_tables(output_dir: str | Path) -> dict:
                 records[name] = list(csv.DictReader(file))
             if len(records[name]) != counts[name]:
                 errors.append(f"row_count_mismatch:{name}")
+        records["context_posts"] = []
+        context_path = tables / "context_posts.csv"
+        if context_path.exists():
+            with context_path.open(encoding="utf-8-sig", newline="") as file:
+                records["context_posts"] = list(csv.DictReader(file))
+        if len(records["context_posts"]) != counts.get("context_posts", 0):
+            errors.append("row_count_mismatch:context_posts")
         for base, key in ((tables, "sha256"), (output, "source_sha256")):
             for name, digest in manifest[key].items():
                 if hashlib.sha256((base / name).read_bytes()).hexdigest() != digest:
@@ -33,33 +40,49 @@ def validate_tables(output_dir: str | Path) -> dict:
             ("posts", "post_id"),
             ("comments", "comment_id"),
             ("interactions", "interaction_id"),
+            ("context_posts", "post_id"),
         ):
             ids = {row[key] for row in records[name]}
             identifiers[name] = ids
             if "" in ids or len(ids) != len(records[name]):
                 errors.append(f"invalid_or_duplicate_id:{name}")
-        content_ids = identifiers["posts"] | identifiers["comments"]
+        context_ids = identifiers["context_posts"]
+        content_ids = identifiers["posts"] | identifiers["comments"] | context_ids
+        main_ids = identifiers["posts"] | {
+            r["post_id"] for r in records["context_posts"] if r["post_role"] == "main"
+        }
         if identifiers["posts"] & identifiers["comments"]:
             errors.append("post_comment_overlap")
         if identifiers["interactions"] & content_ids:
             errors.append("interaction_content_overlap")
         if (
-            sum(len(records[k]) for k in ("posts", "comments", "interactions"))
+            sum(
+                len(records[k])
+                for k in ("posts", "comments", "interactions", "context_posts")
+            )
             != counts["source_records"]
         ):
             errors.append("source_partition_mismatch")
-        for name in ("posts", "comments", "interactions"):
+        for name in ("posts", "comments", "interactions", "context_posts"):
             if any(
                 row["author_id"] not in identifiers["users"] for row in records[name]
             ):
                 errors.append(f"missing_user:{name}")
         comments = {row["comment_id"]: row for row in records["comments"]}
+        ancestry = {
+            **comments,
+            **{
+                r["post_id"]: r
+                for r in records["context_posts"]
+                if r["post_role"] == "comment"
+            },
+        }
         missing_roots = missing_parents = unknown_depth = 0
         for row in comments.values():
             parent, root = row["parent_post_id"], row["root_post_id"]
             parent_present, root_present = (
                 parent in content_ids,
-                root in identifiers["posts"],
+                root in main_ids,
             )
             missing_roots += not root_present
             missing_parents += not parent_present
@@ -76,7 +99,7 @@ def validate_tables(output_dir: str | Path) -> dict:
                 elif depth == 1 and parent != root:
                     errors.append(f"invalid_direct_reply:{row['comment_id']}")
                 elif depth > 1:
-                    ancestor = comments.get(parent)
+                    ancestor = ancestry.get(parent)
                     if (
                         not ancestor
                         or not ancestor["depth"]
