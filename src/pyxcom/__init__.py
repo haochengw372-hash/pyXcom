@@ -1,4 +1,4 @@
-"""pyXcom: public X collection with an existing Chrome or Edge login."""
+"""pyXcom: public X collection with an existing Chrome, Edge or Safari login."""
 
 from .client import XClient
 from .errors import APIError, AuthenticationError, PyXcomError, RateLimitError

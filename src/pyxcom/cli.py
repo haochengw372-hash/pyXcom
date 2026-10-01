@@ -34,10 +34,17 @@ def _depth(value: str) -> int:
 
 def _common_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--browser", choices=("chrome", "edge"), default="chrome")
-    common.add_argument("--profile", help="Browser profile folder, e.g. 'Profile 3'")
     common.add_argument(
-        "--cookie-db", type=Path, help="Explicit Chrome/Edge Cookies DB path"
+        "--browser", choices=("chrome", "edge", "safari"), default="chrome"
+    )
+    common.add_argument(
+        "--profile",
+        help="Chrome/Edge profile folder, e.g. 'Profile 3'; omit for Safari",
+    )
+    common.add_argument(
+        "--cookie-db",
+        type=Path,
+        help="Chrome/Edge Cookies DB or Safari Cookies.binarycookies path",
     )
     common.add_argument(
         "--proxy", help="HTTP or SOCKS proxy URL for X and mirror requests"

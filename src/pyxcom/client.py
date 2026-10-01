@@ -64,7 +64,7 @@ def _within(post: Post, since: str | None, until: str | None) -> bool:
 
 
 class XClient(DiscoveryMixin, NetworkMixin):
-    """Read public X data using a manually logged-in Chrome or Edge session.
+    """Read public X data using a manually logged-in Chrome, Edge or Safari session.
 
     No browser is launched or controlled. Cookies are read into memory and sent
     only to x.com. A search mirror is used only when explicitly configured.

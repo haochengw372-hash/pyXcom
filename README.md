@@ -1,8 +1,8 @@
 # pyXcom
 
-**使用前请自行打开 Chrome 并登录 X。pyXcom 不会打开或控制浏览器，也不会替你登录。**
+**使用前请自行打开 Chrome、Edge 或 Safari 并登录 X。pyXcom 不会打开或控制浏览器，也不会替你登录。**
 
-Collect public X user profiles, posts, replies, search results and observed network relationships using your existing Chrome or Edge session. Post datasets contain three linked CSV tables: `users.csv`, `posts.csv` and `comments.csv`; network datasets have separate relationship and snapshot tables.
+Collect public X user profiles, posts, replies, search results and observed network relationships using your existing Chrome, Edge or Safari session. Post datasets contain three linked CSV tables: `users.csv`, `posts.csv` and `comments.csv`; network datasets have separate relationship and snapshot tables.
 
 Version 0.7.0 adds native search, quote discovery, repost activity and follower/following snapshots. These capabilities have passed offline tests and bounded authenticated live endpoint tests. Collection remains limited to results returned by X; the tests do not establish complete historical or network coverage.
 
@@ -53,6 +53,23 @@ with XClient(profile="Default") as client:
 Repeat the same call and output directory to resume. `max_pages=2` fetches at most two pages **per timeline per call**. Remove this option to continue paging until the source ends or the date boundary is reached. A saved partial result reports its stop reason.
 
 Optional constructor settings include `browser="edge"`, `cookie_db=...`, `proxy=...`, `delay=1.0`, and `timeout=30`. Cookies are read into memory and sent only to X. No passwords or exported cookie files are needed.
+
+### Safari on macOS
+
+Use an existing Safari login without launching a browser:
+
+```python
+with XClient(browser="safari") as client:
+    profile = client.get_user("OpenAI")
+```
+
+```bash
+pyxcom user OpenAI --browser safari
+```
+
+Safari reads `Cookies.binarycookies` using the already included `browser-cookie3`. Omit `profile`: Safari profile selection is not supported by this adapter. For storage outside the supported default locations, use `cookie_db="/accessible/path/Cookies.binarycookies"` or CLI `--cookie-db`. Chrome and Edge still use their existing profile/database options.
+
+If macOS denies file access, pyXcom reports an `AuthenticationError` identifying the permission issue. The user may authorize the application running pyXcom (such as their terminal or Codex) in **System Settings → Privacy & Security → Full Disk Access**, then retry. The package does not change permissions or fall back past denied access. Missing storage, an unsupported cookie-file format, and absence of the required X login cookies are reported separately. This does not establish that an expired session is still accepted by X.
 
 ## Python functions
 

@@ -11,7 +11,7 @@ XClient(*, browser="chrome", profile=None, cookie_db=None, proxy=None,
         mirror_base=None, delay=1.0, timeout=30)
 ```
 
-Use as a context manager to close connections. `profile` selects the local browser profile; it is not an X username. Manually sign in first. The client never launches a browser.
+Use as a context manager to close connections. `profile` selects the local browser profile; it is not an X username. Manually sign in first. The client never launches a browser. Supported choices are `chrome`, `edge`, and `safari` (macOS only). For Safari omit `profile`; optionally select an accessible `Cookies.binarycookies` file with `cookie_db`. Permission denial is reported as `AuthenticationError` with macOS Full Disk Access guidance, without changing system permissions. Chrome/Edge profile selection is unchanged.
 
 ## Lookup methods
 
