@@ -97,6 +97,68 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(manifest["date_scope"]["out_of_window_observations"], 1)
             self.assertTrue(manifest["date_scope"]["local_filter_applied"])
 
+    def test_out_of_window_pages_do_not_stop_before_eligible_search_results(self):
+        c = Client()
+        pages = [
+            page(
+                *[
+                    tweet(
+                        str(1234567900 + batch * 20 + i),
+                        created="Fri Sep 04 00:00:00 +0000 2026",
+                    )
+                    for i in range(20)
+                ],
+                cursor=f"page-{batch + 1}",
+            )
+            for batch in range(5)
+        ]
+        pages.append(
+            page(
+                tweet("1234568001", created="Wed Sep 02 12:00:00 +0000 2026"), end=True
+            )
+        )
+        c._x.search_page.side_effect = pages
+        with tempfile.TemporaryDirectory() as tmp:
+            result = c.save_search_query(
+                "(reset OR resetting)", tmp, since="2026-09-02", until="2026-09-03"
+            )
+            manifest = json.loads((Path(tmp) / "manifest.json").read_text())
+            self.assertEqual(result.post_count, 1)
+            self.assertEqual(result.pages_fetched, 6)
+            self.assertEqual(manifest["date_scope"]["returned_observations"], 101)
+            self.assertEqual(manifest["date_scope"]["out_of_window_observations"], 100)
+            self.assertEqual(
+                manifest["date_scope"]["warning"],
+                "source_returned_posts_outside_requested_dates",
+            )
+            self.assertEqual(c._x.search_page.call_count, 6)
+            for call in c._x.search_page.call_args_list:
+                self.assertEqual(
+                    call.args[0],
+                    "(reset OR resetting) since:2026-09-02 until:2026-09-03",
+                )
+
+    def test_filtered_zero_search_preserves_warning_and_pagination_status(self):
+        for ended in (False, True):
+            with self.subTest(source_end=ended), tempfile.TemporaryDirectory() as tmp:
+                c = Client()
+                c._x.search_page.return_value = page(
+                    tweet("1234567891", created="Fri Sep 04 00:00:00 +0000 2026"),
+                    cursor=None if ended else "next",
+                    end=ended,
+                )
+                result = c.save_search_query(
+                    "reset", tmp, since="2026-09-02", until="2026-09-03", max_pages=1
+                )
+                manifest = json.loads((Path(tmp) / "manifest.json").read_text())
+                self.assertEqual(result.post_count, 0)
+                self.assertEqual(result.complete, ended)
+                self.assertEqual(result.reason, "source_end" if ended else "page_limit")
+                self.assertEqual(
+                    manifest["date_scope"]["out_of_window_observations"], 1
+                )
+                self.assertIn("warning", manifest["date_scope"])
+
     def test_native_complex_query_preserved_and_dates_filter_locally(self):
         client = Client()
         client._x.search_page.return_value = page(

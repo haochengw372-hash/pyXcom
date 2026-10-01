@@ -106,10 +106,22 @@ def validate_collection(output_dir: str | Path) -> dict:
         errors.append("duplicate_post_ids")
     query = manifest.get("query", {})
     since, until = query.get("since"), query.get("until")
+    # Conversation traversal retains the seed and out-of-window ancestors so
+    # eligible descendants remain connected. query.root_post_id identifies the
+    # requested seed, which may itself be a reply. Analysis descendants stay scoped.
+    date_rows = (
+        row
+        for row in rows
+        if query.get("kind") != "post_comments"
+        or (
+            row.get("observation_role", "analysis") != "context"
+            and row["id"] != query.get("root_post_id")
+        )
+    )
     if any(
         (since and row["created_at_utc"][:10] < since)
         or (until and row["created_at_utc"][:10] >= until)
-        for row in rows
+        for row in date_rows
     ):
         errors.append("post_outside_date_range")
     for filename, digest in manifest.get("sha256", {}).items():

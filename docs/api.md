@@ -73,6 +73,8 @@ These methods expand descendants of the seed from all visible authors, including
 
 Traversal depth is relative to the seed (direct replies=1), recorded as `seed_post_id` and `seed_relative_depth`. Actual platform `root_post_id`, `parent_post_id` and `depth` remain separate; missing ancestors can leave actual `depth` unresolved. UTC `since`/`until` filter returned descendants while preserving traversal context. Comment cap is exact and cumulative per dataset; page cap applies to each call. A rate-limited save preserves its queue with `complete=false`; memory/iterator methods raise `RateLimitError`. Network/parse failures save a partial checkpoint and raise. Repeating a save with larger comment/page budgets resumes it; changing seed/depth/date scope requires a separate dataset. Completion only means visible traversal within the requested depth ended, not an exhaustive historical thread. CLI comment/page caps accept `all` for Python `None`; depth must remain a positive integer.
 
+For offline validation of `post_comments`, UTC date scope applies to analysis descendants, while the seed and explicitly marked context can lie outside it. These retained records still participate in identifier, relationship and artifact-integrity checks. The exemption does not apply to other collection types; a descendant missing `observation_role` is treated as analysis for this date check.
+
 ## Keyword search
 
 ```python
@@ -111,7 +113,7 @@ save_user_reposts(handle, output_dir, *, since=None, until=None,
 
 All options are explicit and keyword-only. Dates are inclusive/exclusive UTC dates; budgets are positive integers or `None`. Native search uses X Latest, preserves query operators, and does not use the mirror. `*_post_quotes` discovers candidates using `quoted_tweet_id:` and verifies the returned target ID. Its result is a visible search sample, not the complete quote population. `*_user_reposts` parses visible repost wrappers in the account timeline, preserving the action ID/time and original target ID/time; it cannot infer missing reposts. If X returns flattened originals instead of wrappers, action times cannot be recovered; the save reports incomplete `repost_activity_unavailable` rather than substituting original publication times.
 
-Saved discovery queries retain original/effective query provenance, raw response pages and resumable cursors. Save scopes cannot be changed within the same directory. Use `complete` and `reason` to report caps, source end, rate limits or stalled pagination. A visible source end does not establish historical exhaustiveness.
+Saved discovery queries retain original/effective query provenance, raw response pages and resumable cursors. Save scopes cannot be changed within the same directory. Use `complete` and `reason` to report caps, source end, rate limits or stalled pagination. A visible source end does not establish historical exhaustiveness. For bounded native searches, inspect `manifest.json.date_scope` alongside `complete` and `reason`: the source may return out-of-window posts even when the exact query includes `since:` and `until:`. Local filtering uses UTC `[since, until)`, and all-out-of-window pages can still be followed by valid results. A filtered zero with `source_returned_posts_outside_requested_dates` is not evidence of an empty historical population. The package does not infer a source timezone or modify research query terms to compensate.
 
 ## Network lists and snapshots
 
