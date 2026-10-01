@@ -424,6 +424,7 @@ def export_tables(output_dir: str | Path) -> dict:
             "newest_post_utc",
             "missing_ids",
             "date_scope",
+            "discovery_pagination",
         ):
             if key in collection:
                 manifest[key] = collection[key]

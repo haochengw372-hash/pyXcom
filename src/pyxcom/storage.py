@@ -259,6 +259,11 @@ class PostStore:
                 if "date_scope" in self.state
                 else {}
             ),
+            **(
+                {"discovery_pagination": self.state["discovery_pagination"]}
+                if "discovery_pagination" in self.state
+                else {}
+            ),
             "query": self.state["query"],
             "post_count": len(rows),
             "pages_fetched": self.state["pages_fetched"],

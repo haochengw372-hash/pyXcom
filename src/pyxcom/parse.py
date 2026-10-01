@@ -196,34 +196,53 @@ def timeline_posts(data: dict, *, captured_at_utc: str | None = None) -> list[Po
     return list(posts.values())
 
 
+def _timeline_item_contents(data: dict) -> Iterator[dict]:
+    """Yield primary timeline content, never embedded quoted post objects."""
+    instructions: list[dict] = next(
+        (
+            node["instructions"]
+            for node in _walk(data.get("data", data))
+            if isinstance(node.get("instructions"), list)
+        ),
+        [],
+    )
+    for instruction in instructions:
+        entries = list(instruction.get("entries", []))
+        if isinstance(instruction.get("entry"), dict):
+            entries.append(instruction["entry"])
+        for entry in entries:
+            content = entry.get("content") or {}
+            if isinstance(content.get("items"), list):
+                if not content["items"]:
+                    yield content
+                for module_item in content["items"]:
+                    item = module_item.get("item") or module_item
+                    yield item.get("itemContent") or item
+            else:
+                item = content.get("itemContent") or content
+                if (
+                    str(entry.get("entryId", "")).startswith("cursor-")
+                    and item.get("value")
+                    and not item.get("entryType")
+                ):
+                    item = {**item, "entryType": "TimelineTimelineCursor"}
+                yield item
+        for module_item in instruction.get("moduleItems", []):
+            item = module_item.get("item") or module_item
+            yield item.get("itemContent") or item
+
+
 def timeline_primary_posts(
     data: dict, *, captured_at_utc: str | None = None
 ) -> list[Post]:
-    """Read timeline entries without recursively counting quoted post content."""
-    instructions = None
-    for node in _walk(data.get("data", data)):
-        if isinstance(node.get("instructions"), list):
-            instructions = node["instructions"]
-            break
-    if instructions is None:
-        return []
+    """Read primary entries, replacements and modules without counting quotes."""
     posts: dict[str, Post] = {}
-    for instruction in instructions:
-        for entry in instruction.get("entries", []):
-            content = entry.get("content") or {}
-            items = [content]
-            for module_item in content.get("items", []):
-                items.append(module_item.get("item") or module_item)
-            for item in items:
-                result = (
-                    (item.get("itemContent") or {})
-                    .get("tweet_results", {})
-                    .get("result")
-                )
-                if isinstance(result, dict):
-                    post = parse_post(result, captured_at_utc=captured_at_utc)
-                    if post is not None:
-                        posts[post.id] = post
+    for content in _timeline_item_contents(data):
+        result = (content.get("tweet_results") or {}).get("result")
+        if isinstance(result, dict):
+            post = parse_post(result, captured_at_utc=captured_at_utc)
+            if post is not None:
+                posts[post.id] = post
     return list(posts.values())
 
 

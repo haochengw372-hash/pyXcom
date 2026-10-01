@@ -94,26 +94,30 @@ save_search_posts(keyword, output_dir, *, handle=None, since=None, until=None,
 iter_search_query(query, *, since=None, until=None, max_pages=None, limit=None) -> Iterator[Post]
 get_search_query(query, *, since=None, until=None, max_pages=None, limit=None) -> list[Post]
 save_search_query(query, output_dir, *, since=None, until=None,
-                  max_pages=None, limit=None) -> CollectionResult
+                  max_pages=None, limit=None, retry_stalled=False) -> CollectionResult
 
 iter_post_quotes(post_id_or_url, *, since=None, until=None,
                  max_pages=None, limit=None) -> Iterator[Post]
 get_post_quotes(post_id_or_url, *, since=None, until=None,
                 max_pages=None, limit=None) -> list[Post]
 save_post_quotes(post_id_or_url, output_dir, *, since=None, until=None,
-                 max_pages=None, limit=None) -> CollectionResult
+                 max_pages=None, limit=None, retry_stalled=False) -> CollectionResult
 
 iter_user_reposts(handle, *, since=None, until=None,
                   max_pages=None, limit=None) -> Iterator[Post]
 get_user_reposts(handle, *, since=None, until=None,
                  max_pages=None, limit=None) -> list[Post]
 save_user_reposts(handle, output_dir, *, since=None, until=None,
-                  max_pages=None, limit=None) -> CollectionResult
+                  max_pages=None, limit=None, retry_stalled=False) -> CollectionResult
 ```
 
 All options are explicit and keyword-only. Dates are inclusive/exclusive UTC dates; budgets are positive integers or `None`. Native search uses X Latest, preserves query operators, and does not use the mirror. `*_post_quotes` discovers candidates using `quoted_tweet_id:` and verifies the returned target ID. Its result is a visible search sample, not the complete quote population. `*_user_reposts` parses visible repost wrappers in the account timeline, preserving the action ID/time and original target ID/time; it cannot infer missing reposts. If X returns flattened originals instead of wrappers, action times cannot be recovered; the save reports incomplete `repost_activity_unavailable` rather than substituting original publication times.
 
 Saved discovery queries retain original/effective query provenance, raw response pages and resumable cursors. Save scopes cannot be changed within the same directory. Use `complete` and `reason` to report caps, source end, rate limits or stalled pagination. A visible source end does not establish historical exhaustiveness. For bounded native searches, inspect `manifest.json.date_scope` alongside `complete` and `reason`: the source may return out-of-window posts even when the exact query includes `since:` and `until:`. Local filtering uses UTC `[since, until)`, and all-out-of-window pages can still be followed by valid results. A filtered zero with `source_returned_posts_outside_requested_dates` is not evidence of an empty historical population. The package does not infer a source timezone or modify research query terms to compensate.
+
+Native discovery pauses with `complete=false` and `reason="empty_page_limit"` after 3 consecutive source-empty pages, or `reason="no_progress_limit"` after 5 consecutive pages without new primary source IDs. The counters persist across `max_pages` calls in `.pyxcom/state.json` and are summarized in `manifest.json.discovery_pagination`. Source emptiness is checked before date/quote/author filtering; fresh tweets filtered to zero do not count as empty or stalled. Replacement entries and module additions are parsed as primary content. Unsupported or unavailable tweet content reports a parse error rather than being counted as a cursor-only page.
+
+A pause is a heuristic coverage warning, not a source-end or historical-completeness claim. Repeating a paused save does not fetch more pages by default, even if its budget increases. To probe again, explicitly use `retry_stalled=True` on `save_search_query`, `save_post_quotes` or `save_user_reposts` (CLI `--retry-stalled`). This clears the consecutive counters while preserving the saved cursor, raw pages, existing records and seen source IDs. A fresh source post resets the streak; another stalled run pauses again. Partly consumed pages replayed after an item cap do not count as stalled. Memory/iterator discovery raises `APIError` on these pauses so a returned prefix is not silently presented as completed retrieval. Existing checkpoints without the counters begin tracking from their next request.
 
 ## Network lists and snapshots
 

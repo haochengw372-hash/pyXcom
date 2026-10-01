@@ -9,7 +9,13 @@ from urllib.parse import quote
 
 from .errors import APIError, ParseError, RateLimitError
 from .models import CollectionResult, Post, Profile
-from .parse import _walk, bottom_cursor, parse_post, timeline_primary_posts
+from .parse import (
+    _timeline_item_contents,
+    _walk,
+    bottom_cursor,
+    parse_post,
+    timeline_primary_posts,
+)
 from .storage import PostStore
 from .transport import XTransport, now_utc
 
@@ -29,6 +35,96 @@ def _source_end(payload: dict) -> bool:
         and item.get("direction") == "Bottom"
         for item in _instructions(payload)
     )
+
+
+_EMPTY_PAGE_LIMIT = 3
+_NO_PROGRESS_LIMIT = 5
+_PAUSE_REASONS = {"empty_page_limit", "no_progress_limit"}
+
+
+def _source_page(payload: dict) -> tuple[list[Post], bool]:
+    """Distinguish cursor-only pages from filtered or unsupported tweet content."""
+    instructions = _instructions(payload)
+    known_instructions = {
+        "TimelineAddEntries",
+        "TimelineReplaceEntry",
+        "TimelineAddToModule",
+        "TimelinePinEntry",
+        "TimelineTerminateTimeline",
+        "TimelineClearCache",
+    }
+    if any(i.get("type") not in known_instructions for i in instructions):
+        raise ParseError("X discovery returned an unsupported timeline instruction")
+    for content in _timeline_item_contents(payload):
+        if "tweet_results" in content:
+            tweet_results = content.get("tweet_results")
+            result = (
+                tweet_results.get("result") if isinstance(tweet_results, dict) else None
+            )
+            if not isinstance(result, dict) or parse_post(result) is None:
+                raise ParseError(
+                    "X discovery returned an unavailable or unparseable primary tweet"
+                )
+        elif not (
+            content.get("cursorType")
+            or content.get("entryType") == "TimelineTimelineCursor"
+            or content.get("itemType") == "TimelineTimelineCursor"
+        ):
+            raise ParseError(
+                "X discovery returned unsupported primary timeline content"
+            )
+    primary = timeline_primary_posts(payload)
+    return primary, not primary
+
+
+def _record_source_page(
+    state: dict,
+    primary: list[Post],
+    source_empty: bool,
+    *,
+    truncated: bool = False,
+    ended: bool = False,
+) -> str | None:
+    audit = state.setdefault(
+        "discovery_pagination",
+        {
+            "consecutive_source_empty_pages": 0,
+            "consecutive_no_progress_pages": 0,
+            "empty_page_limit": _EMPTY_PAGE_LIMIT,
+            "no_progress_limit": _NO_PROGRESS_LIMIT,
+            "status": "active",
+        },
+    )
+    seen = set(state.get("discovery_source_ids", []))
+    source_ids = {p.id for p in primary}
+    audit["last_page_primary_count"] = len(primary)
+    audit["last_page_new_source_ids"] = len(source_ids - seen)
+    audit["consecutive_source_empty_pages"] = (
+        audit["consecutive_source_empty_pages"] + 1 if source_empty else 0
+    )
+    # Item caps intentionally replay a partly consumed page. Do not classify that
+    # page as no progress or remember its unread source IDs as already consumed.
+    audit["consecutive_no_progress_pages"] = (
+        0
+        if truncated or source_ids - seen
+        else audit["consecutive_no_progress_pages"] + 1
+    )
+    if not truncated:
+        seen.update(source_ids)
+        state["discovery_source_ids"] = sorted(seen)
+    audit["source_ids_seen"] = len(seen)
+    reason = None
+    if not ended and not truncated:
+        if audit["consecutive_source_empty_pages"] >= _EMPTY_PAGE_LIMIT:
+            reason = "empty_page_limit"
+        elif audit["consecutive_no_progress_pages"] >= _NO_PROGRESS_LIMIT:
+            reason = "no_progress_limit"
+    audit["status"] = "paused" if reason else ("source_end" if ended else "active")
+    if reason:
+        audit["stop_reason"] = reason
+    else:
+        audit.pop("stop_reason", None)
+    return reason
 
 
 def _repost_activity_unavailable(payload: dict, user_id: str) -> bool:
@@ -147,6 +243,7 @@ class DiscoveryMixin:
         seen_cursors: set[str] = set()
         seen_ids: set[str] = set()
         pages = 0
+        pagination_state: dict = {}
         while True:
             if cursor and cursor in seen_cursors:
                 raise APIError("Discovery pagination repeated its cursor")
@@ -160,6 +257,10 @@ class DiscoveryMixin:
                     "Repost activity unavailable: X returned a social-context repost "
                     "without an outer repost ID and action timestamp"
                 )
+            primary, source_empty = _source_page(payload)
+            pause_reason = _record_source_page(
+                pagination_state, primary, source_empty, ended=_source_end(payload)
+            )
             for post in self._discovery_posts(payload, query):
                 if post.id in seen_ids:
                     continue
@@ -174,6 +275,10 @@ class DiscoveryMixin:
                         "Quote query is unverified: no matching quoted post IDs"
                     )
                 return
+            if pause_reason:
+                raise APIError(
+                    f"Discovery pagination paused: {pause_reason}; coverage remains incomplete"
+                )
             cursor = bottom_cursor(payload)
             if not cursor:
                 raise APIError("Discovery pagination omitted its bottom cursor")
@@ -191,10 +296,28 @@ class DiscoveryMixin:
         output_dir: str | Path,
         max_pages: int | None,
         limit: int | None,
+        *,
+        retry_stalled: bool = False,
     ) -> CollectionResult:
+        if not isinstance(retry_stalled, bool):
+            raise ValueError("retry_stalled must be a boolean")
         store = PostStore(output_dir, query=query)
         if store.complete:
             return store.finish(complete=True, reason=store.state["reason"])
+        audit = store.state.get("discovery_pagination", {})
+        if (
+            audit.get("status") == "paused"
+            and audit.get("stop_reason") in _PAUSE_REASONS
+        ):
+            if not retry_stalled:
+                return store.finish(complete=False, reason=audit["stop_reason"])
+            audit.update(
+                consecutive_source_empty_pages=0,
+                consecutive_no_progress_pages=0,
+                status="active",
+            )
+            audit.pop("stop_reason", None)
+            store.log(operation="retry_stalled_discovery", cursor=store.cursor)
         if limit and store.count >= limit:
             return store.finish(complete=False, reason="item_limit")
         cursor = store.cursor
@@ -228,13 +351,13 @@ class DiscoveryMixin:
             )
             store.archive_response(payload, operation=operation, variables=variables)
             try:
+                primary, source_empty = _source_page(payload)
                 posts = self._discovery_posts(payload, query)
                 if query["kind"] == "search_query" and (
                     query["since"] or query["until"]
                 ):
                     from .client import _within
 
-                    primary = timeline_primary_posts(payload)
                     audit = store.state.setdefault(
                         "date_scope",
                         {
@@ -268,6 +391,9 @@ class DiscoveryMixin:
                 assert limit is not None
                 keep = {p.id for p in unique_new[: limit - store.count]}
                 posts = [p for p in posts if p.id in existing_ids or p.id in keep]
+            pause_reason = _record_source_page(
+                store.state, primary, source_empty, truncated=truncated, ended=ended
+            )
             store.state.pop("rate_reset_at", None)
             store.append_page(
                 posts, cursor if truncated or unavailable else next_cursor
@@ -283,6 +409,8 @@ class DiscoveryMixin:
                 if query["kind"] == "post_quotes" and not store.count:
                     return store.finish(complete=False, reason="query_unverified")
                 return store.finish(complete=True, reason="source_end")
+            if pause_reason:
+                return store.finish(complete=False, reason=pause_reason)
             if not next_cursor:
                 reason = (
                     "query_unverified"
@@ -347,6 +475,7 @@ class DiscoveryMixin:
         until: str | None = None,
         max_pages: int | None = None,
         limit: int | None = None,
+        retry_stalled: bool = False,
     ) -> CollectionResult:
         effective, since, until = _query_options(query, since, until, max_pages, limit)
         spec = {
@@ -356,7 +485,9 @@ class DiscoveryMixin:
             "since": since,
             "until": until,
         }
-        return self._save_discovery(spec, output_dir, max_pages, limit)
+        return self._save_discovery(
+            spec, output_dir, max_pages, limit, retry_stalled=retry_stalled
+        )
 
     def _quote_query(
         self,
@@ -425,9 +556,12 @@ class DiscoveryMixin:
         until: str | None = None,
         max_pages: int | None = None,
         limit: int | None = None,
+        retry_stalled: bool = False,
     ) -> CollectionResult:
         spec = self._quote_query(post_id_or_url, since, until, max_pages, limit)
-        return self._save_discovery(spec, output_dir, max_pages, limit)
+        return self._save_discovery(
+            spec, output_dir, max_pages, limit, retry_stalled=retry_stalled
+        )
 
     def _repost_query(
         self,
@@ -493,6 +627,9 @@ class DiscoveryMixin:
         until: str | None = None,
         max_pages: int | None = None,
         limit: int | None = None,
+        retry_stalled: bool = False,
     ) -> CollectionResult:
         spec = self._repost_query(handle, since, until, max_pages, limit)
-        return self._save_discovery(spec, output_dir, max_pages, limit)
+        return self._save_discovery(
+            spec, output_dir, max_pages, limit, retry_stalled=retry_stalled
+        )

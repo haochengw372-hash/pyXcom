@@ -117,6 +117,10 @@ with XClient(profile="Default") as client:
 
 Quote discovery uses native search followed by a check of `quoted_post_id`; zero matches do not establish zero quotes. Repost activity is collected from visible account timeline wrappers, preserving the repost ID and its action timestamp separately from the original post ID/time. A flattened timeline that only returns originals cannot establish action times and reports `repost_activity_unavailable` with an incomplete result. It is not a complete historical repost archive. Search sorting, visibility and pagination remain controlled by X.
 
+Discovery pauses when the source keeps changing cursors without useful pagination: 3 consecutive cursor-only/empty pages produce `empty_page_limit`, and 5 pages without new primary source IDs produce `no_progress_limit`. Both are incomplete results. Counters persist across save/resume calls and appear in `manifest.json.discovery_pagination`; tweets excluded by date or quote filters are still source content, so a filtered zero is not an empty-page signal.
+
+Paused saves retain raw responses and the last cursor. Calling the same save normally preserves the pause without more requests. If you deliberately want to probe the source later, repeat it with `retry_stalled=True` (CLI `--retry-stalled`); this resets the streak without discarding records, raw archives or the cursor. These thresholds are a conservative stopping heuristic and do not prove all historical posts were collected. A fresh query with genuine new source posts continues normally. See [API reference](https://github.com/haochengw372-hash/pyXcom/blob/main/docs/api.md) for the precise stopping and retry contract.
+
 ### Follow networks and reposter lists
 
 Resolve a handle with `get_user(handle).id`, then pass that stable numeric ID to follower/following methods:

@@ -71,6 +71,22 @@ class CapabilityCLITests(unittest.TestCase):
                     limit=25,
                 )
 
+    def test_discovery_retry_flag_is_explicit_and_forwarded(self):
+        for command, value, method in (
+            ("search-query", "reset", "save_search_query"),
+            ("post-quotes", "1234567890", "save_post_quotes"),
+            ("user-reposts", "alice", "save_user_reposts"),
+        ):
+            with self.subTest(command=command):
+                code, client, _, stderr = self.run_command(
+                    [command, value, "--output-dir", "out", "--retry-stalled"]
+                )
+                self.assertEqual(code, 0)
+                self.assertEqual(stderr, "")
+                self.assertTrue(
+                    getattr(client, method).call_args.kwargs["retry_stalled"]
+                )
+
     def test_network_commands_forward_snapshot_and_stable_identifier(self):
         for command, value, method in (
             ("user-followers", "100", "save_followers"),

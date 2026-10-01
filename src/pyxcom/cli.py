@@ -201,6 +201,11 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--max-pages", type=_budget)
         command.add_argument("--limit", type=_budget)
         command.add_argument(
+            "--retry-stalled",
+            action="store_true",
+            help="Explicitly retry discovery paused by source empty/no-progress pages",
+        )
+        command.add_argument(
             "--output-dir", "--output", dest="output", type=Path, required=True
         )
     for name, argument, help_text in (
@@ -310,6 +315,7 @@ def main(argv: list[str] | None = None) -> int:
                     until=args.until,
                     max_pages=args.max_pages,
                     limit=args.limit,
+                    **({"retry_stalled": True} if args.retry_stalled else {}),
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))
             elif args.command in ("user-followers", "user-following", "post-reposters"):
