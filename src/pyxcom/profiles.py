@@ -70,7 +70,8 @@ def _read_snapshots(directory: Path) -> list[dict]:
     snapshots = {}
     ledger = source_path(directory, "profile_observations.jsonl")
     if ledger.exists():
-        for line in ledger.read_text(encoding="utf-8").splitlines():
+        # JSONL records end at LF. Unicode separators belong to JSON strings.
+        for line in ledger.read_text(encoding="utf-8").split("\n"):
             if line.strip():
                 row = json.loads(line)
                 verified = _snapshot(
@@ -163,7 +164,7 @@ def save_profiles(output_dir: str | Path, payload: dict) -> None:
     if ledger.exists():
         saved = {
             json.loads(line)["snapshot_id"]
-            for line in ledger.read_text(encoding="utf-8").splitlines()
+            for line in ledger.read_text(encoding="utf-8").split("\n")
             if line.strip()
         }
     with ledger.open("a", encoding="utf-8") as stream:

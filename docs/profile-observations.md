@@ -24,6 +24,11 @@ replacing that view. This preserves subsequent same-handle updates across calls.
 Older observations already overwritten before this change cannot be recreated
 from `profiles.json` alone; existing raw archives remain their evidence.
 
+The history ledger uses LF-delimited JSON records. Unicode line and paragraph
+separators inside profile text, including nested `profile_json`, remain literal
+content and do not divide records. Reading and resuming preserve those bytes and
+snapshot IDs. Malformed JSON records still fail explicitly.
+
 Different nonempty account creation timestamps for the same ID remain an
 explicit identity conflict. Equivalent timezone representations are compatible;
 a missing creation timestamp does not contradict a known one. Invalid IDs or

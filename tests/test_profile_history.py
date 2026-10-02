@@ -175,3 +175,104 @@ class ProfileHistoryTests(unittest.TestCase):
         self.assertEqual(
             rows(self.directory, "users.csv")[0]["username"], "clicktobuynow"
         )
+
+    def test_unicode_separators_survive_history_append_resume_and_export(self):
+        from pyxcom.profiles import profile_views, save_profiles
+
+        for separator in ("\u2028", "\u2029", "\u0085"):
+            with (
+                self.subTest(separator=repr(separator)),
+                tempfile.TemporaryDirectory() as tmp,
+            ):
+                directory = Path(tmp)
+                store = PostStore(
+                    directory,
+                    query={
+                        "kind": "post_comments",
+                        "root_post_id": "1",
+                        "max_depth": 2,
+                    },
+                )
+                post = Post(
+                    id="1",
+                    author_id="99204810",
+                    author_handle="same",
+                    created_at_utc="2026-07-05T00:00:00+00:00",
+                    text="before" + separator + "after",
+                    url="https://x.com/same/status/1",
+                )
+                store.append_page([post], "original-cursor")
+                old = {**self.old, "description": "old" + separator + "description"}
+                new = {**self.new, "description": "new" + separator + "description"}
+                save_profiles(directory, {"same": old})
+                ledger = directory / ".pyxcom/profile_observations.jsonl"
+                before = ledger.read_bytes()
+                before_ids = {r["snapshot_id"] for r in profile_views(directory)[1]}
+                save_profiles(directory, {"same": new})
+                save_profiles(directory, {"same": new})
+                selected, snapshots, _ = profile_views(directory)
+                self.assertEqual(
+                    selected["99204810"]["description"], new["description"]
+                )
+                self.assertEqual(len(snapshots), 2)
+                self.assertTrue(before_ids <= {r["snapshot_id"] for r in snapshots})
+                self.assertTrue(ledger.read_bytes().startswith(before))
+                self.assertIn(separator.encode(), ledger.read_bytes())
+                self.assertEqual(
+                    len(
+                        [
+                            line
+                            for line in ledger.read_text().split("\n")
+                            if line.strip()
+                        ]
+                    ),
+                    2,
+                )
+                resumed = PostStore(directory, query=store.state["query"])
+                self.assertEqual(resumed.cursor, "original-cursor")
+                self.assertEqual(resumed._posts["1"].text, post.text)
+                resumed.finish(complete=False, reason="page_limit")
+                self.assertEqual(
+                    rows(directory, "users.csv")[0]["description"], new["description"]
+                )
+                exported = rows(directory, "profile_snapshots.csv")
+                self.assertEqual(
+                    {r["snapshot_id"] for r in exported},
+                    {r["snapshot_id"] for r in snapshots},
+                )
+                self.assertTrue(
+                    all(
+                        separator in json.loads(r["profile_json"])["description"]
+                        for r in exported
+                    )
+                )
+                self.assertTrue(validate_collection(directory)["valid"])
+
+    def test_crlf_history_is_read_without_changing_existing_bytes(self):
+        from pyxcom.profiles import profile_views, save_profiles
+
+        save_profiles(self.directory, {"same": self.old})
+        ledger = self.directory / ".pyxcom/profile_observations.jsonl"
+        ledger.write_bytes(ledger.read_bytes().replace(b"\n", b"\r\n"))
+        before = ledger.read_bytes()
+        save_profiles(self.directory, {"same": self.new})
+        self.assertTrue(ledger.read_bytes().startswith(before))
+        self.assertEqual(len(profile_views(self.directory)[1]), 2)
+
+    def test_genuinely_broken_history_fails_and_is_not_rewritten(self):
+        from pyxcom.profiles import profile_views, save_profiles
+
+        save_profiles(self.directory, {"same": self.old})
+        self.store.finish(complete=False, reason="page_limit")
+        ledger = self.directory / ".pyxcom/profile_observations.jsonl"
+        with ledger.open("ab") as stream:
+            stream.write(b'{"profile_json": "unterminated\n')
+        before = ledger.read_bytes(), self.path.read_bytes()
+        with self.assertRaises(json.JSONDecodeError):
+            profile_views(self.directory)
+        with self.assertRaises(json.JSONDecodeError):
+            save_profiles(self.directory, {"same": self.new})
+        with self.assertRaises(json.JSONDecodeError):
+            export_tables(self.directory)
+        self.assertFalse(validate_collection(self.directory)["valid"])
+        self.assertEqual((ledger.read_bytes(), self.path.read_bytes()), before)
