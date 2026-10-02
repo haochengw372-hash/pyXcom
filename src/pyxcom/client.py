@@ -11,12 +11,13 @@ from typing import Callable, Iterator
 from .discovery import DiscoveryMixin
 from .networks import NetworkMixin
 from .auth import load_x_cookies
+from .profiles import save_profiles as _save_profiles
 from .errors import APIError, RateLimitError
 from .layout import child_dir, migrate_collection, source_path
 from .models import CollectionResult, Post, Profile
 from .parse import bottom_cursor, timeline_primary_posts
 from .search import MirrorSearch
-from .storage import PostStore, _atomic_json
+from .storage import PostStore
 from .transport import TWEET_FEATURES, XTransport, now_utc
 
 _HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
@@ -260,10 +261,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
         store = PostStore(output_dir, query=query)
         store.retain_role("comment" if timeline == "replies" else "main")
         if query["kind"] == "user_timeline":
-            _atomic_json(
-                source_path(output_dir, "profiles.json"),
-                {profile.handle: profile.to_dict()},
-            )
+            _save_profiles(output_dir, {profile.handle: profile.to_dict()})
         if store.complete:
             return store.finish(complete=True, reason=store.state["reason"])
         cursor = store.cursor
@@ -372,9 +370,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             },
         )
         profile = self.get_user(handle)
-        _atomic_json(
-            source_path(output, "profiles.json"), {profile.handle: profile.to_dict()}
-        )
+        _save_profiles(output, {profile.handle: profile.to_dict()})
         if store.complete and original.complete and replies.complete:
             return store.finish(complete=True, reason="both_timelines_complete")
         combined: dict[str, Post] = {}
@@ -604,9 +600,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             },
         )
         profile = self.get_user(user)
-        _atomic_json(
-            source_path(output, "profiles.json"), {profile.handle: profile.to_dict()}
-        )
+        _save_profiles(output, {profile.handle: profile.to_dict()})
         if store.complete and activity.complete:
             return store.finish(complete=True, reason="both_timelines_complete")
         matches: list[Post] = []
@@ -916,7 +910,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
                 for handle, profile in traversal.state["profiles"].items()
                 if profile["id"] in author_ids
             }
-            _atomic_json(source_path(output_dir, "profiles.json"), profiles)
+            _save_profiles(output_dir, profiles)
 
         archived_response_number = 0
         try:

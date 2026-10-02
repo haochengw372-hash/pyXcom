@@ -10,6 +10,7 @@ from tempfile import NamedTemporaryFile
 
 from .layout import migrate_collection, source_path
 from .models import Post, Profile
+from .profiles import SNAPSHOT_FIELDS, profile_views
 
 _CONTENT = [
     item.name
@@ -223,17 +224,7 @@ def export_tables(output_dir: str | Path) -> dict:
         records[post.id] = post
     depths = _depths(records)
     profiles_path = source_path(directory, "profiles.json")
-    profiles: dict[str, dict] = {}
-    if profiles_path.exists():
-        raw = json.loads(profiles_path.read_text(encoding="utf-8"))
-        entries = (
-            raw if isinstance(raw, list) else ([raw] if "id" in raw else raw.values())
-        )
-        for entry in entries:
-            user_id = str(entry["id"])
-            if user_id in profiles and profiles[user_id] != entry:
-                raise ValueError(f"Conflicting duplicate profile ID: {user_id}")
-            profiles[user_id] = entry
+    profiles, profile_snapshots, profile_report = profile_views(directory)
     users: dict[str, dict] = {
         user_id: {
             "user_id": user_id,
@@ -337,6 +328,10 @@ def export_tables(output_dir: str | Path) -> dict:
         "posts.csv": (_POST, posts),
         "comments.csv": (_COMMENT, comments),
     }
+    if profile_snapshots:
+        tables["profile_snapshots.csv"] = (SNAPSHOT_FIELDS, profile_snapshots)
+    else:
+        (target / "profile_snapshots.csv").unlink(missing_ok=True)
     if interactions:
         tables["interactions.csv"] = (_INTERACTION, interactions)
     if contexts:
@@ -393,6 +388,17 @@ def export_tables(output_dir: str | Path) -> dict:
                 if profiles_path.exists()
                 else {}
             ),
+            **(
+                {
+                    str(
+                        source_path(
+                            directory, "profile_observations.jsonl"
+                        ).relative_to(directory)
+                    ): _hash(source_path(directory, "profile_observations.jsonl"))
+                }
+                if source_path(directory, "profile_observations.jsonl").exists()
+                else {}
+            ),
         },
         "counts": {
             "users": len(users),
@@ -408,6 +414,7 @@ def export_tables(output_dir: str | Path) -> dict:
         "conversation_coverage": "observed_records_only",
         "canonical_record_policy": "first_saved_observation_per_id",
         "metric_policy": "returned_counts_at_observation_time",
+        "profile_observations": profile_report,
         "edge_count": len(edges),
         "sha256": {name: _hash(target / name) for name in tables},
     }

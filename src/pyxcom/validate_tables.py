@@ -3,7 +3,11 @@
 import csv
 import hashlib
 import json
+from dataclasses import fields
 from pathlib import Path
+
+from .models import Profile
+from .profiles import profile_views
 
 
 def validate_tables(output_dir: str | Path) -> dict:
@@ -34,6 +38,36 @@ def validate_tables(output_dir: str | Path) -> dict:
             for name, digest in manifest[key].items():
                 if hashlib.sha256((base / name).read_bytes()).hexdigest() != digest:
                     errors.append(f"hash_mismatch:{key}:{name}")
+        profiles, snapshots, profile_report = profile_views(output)
+        if "profile_observations" in manifest:
+            if manifest["profile_observations"] != profile_report:
+                errors.append("profile_observation_report_mismatch")
+            saved_snapshots = []
+            if snapshots:
+                with (tables / "profile_snapshots.csv").open(
+                    encoding="utf-8-sig", newline=""
+                ) as stream:
+                    saved_snapshots = list(csv.DictReader(stream))
+            expected_snapshots = [
+                {k: "" if v is None else str(v) for k, v in row.items()}
+                for row in snapshots
+            ]
+            if saved_snapshots != expected_snapshots:
+                errors.append("profile_snapshot_mismatch")
+            user_rows = {row["user_id"]: row for row in records["users"]}
+            for identifier, profile in profiles.items():
+                user = user_rows.get(identifier, {})
+                expected = {"profile_available": "True"}
+                for field in fields(Profile):
+                    column = {
+                        "id": "user_id",
+                        "handle": "username",
+                        "name": "display_name",
+                    }.get(field.name, field.name)
+                    value = profile.get(field.name)
+                    expected[column] = "" if value is None else str(value)
+                if any(user.get(key) != value for key, value in expected.items()):
+                    errors.append(f"profile_latest_view_mismatch:{identifier}")
         identifiers: dict[str, set[str]] = {}
         for name, key in (
             ("users", "user_id"),

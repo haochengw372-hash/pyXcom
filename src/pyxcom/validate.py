@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .layout import source_path
 from .models import CollectionResult
+from .profiles import profile_views
 from .storage import PostStore, _atomic_json
 from .transport import now_utc
 from .validate_tables import validate_tables
@@ -25,12 +26,12 @@ def finalize_collection(output_dir: str | Path) -> CollectionResult:
     store = PostStore(output, query=state["query"])
     profiles_path = source_path(output, "profiles.json")
     if profiles_path.exists() and state["query"].get("kind") == "account_batch":
-        from .batch import _account_status, _write_batch_report
+        from .batch import _account_status, _scheduled_profiles, _write_batch_report
 
         profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
         accounts = [
             _account_status(output, handle, profile)
-            for handle, profile in profiles.items()
+            for handle, profile in _scheduled_profiles(output, state["query"], profiles)
         ]
         store.state["pages_fetched"] = sum(
             account[kind]["pages"]
@@ -131,17 +132,30 @@ def validate_collection(output_dir: str | Path) -> dict:
         ):
             errors.append(f"hash_mismatch:{filename}")
     profiles_path = source_path(output, "profiles.json")
-    profiles = {}
-    if profiles_path.exists() and query.get("kind") != "post_comments":
-        profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
-        user_ids = {profile["id"] for profile in profiles.values()}
-        if any(row["author_id"] not in user_ids for row in rows):
-            errors.append("unexpected_author_id")
+    profiles: dict[str, dict] = {}
+    if (
+        profiles_path.exists()
+        or source_path(output, "profile_observations.jsonl").exists()
+    ):
+        try:
+            profiles, _, _ = profile_views(output)
+        except (OSError, ValueError, KeyError, TypeError):
+            errors.append("invalid_profiles")
+        else:
+            if query.get("kind") != "post_comments" and any(
+                str(row["author_id"]) not in profiles for row in rows
+            ):
+                errors.append("unexpected_author_id")
     if source_path(output, "account_manifest.json").exists():
         account_manifest = json.loads(
             (source_path(output, "account_manifest.json")).read_text(encoding="utf-8")
         )
-        if len(account_manifest["accounts"]) != len(profiles):
+        expected_handles = query.get("handles")
+        actual_handles = [account["handle"] for account in account_manifest["accounts"]]
+        if expected_handles is not None and (
+            len(actual_handles) != len(expected_handles)
+            or set(actual_handles) != set(expected_handles)
+        ):
             errors.append("account_manifest_mismatch")
     if (output / "tables").exists() or (output / "comments.csv").exists():
         errors.extend(validate_tables(output)["errors"])

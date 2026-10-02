@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Callable
 from .errors import PyXcomError
 from .layout import child_dir, internal_dir, migrate_collection, source_path
 from .models import CollectionResult, Post, Profile
+from .profiles import profile_views, save_profiles
 from .storage import PostStore, _atomic_json
 from .transport import now_utc
 
@@ -44,7 +45,7 @@ def _account_status(output: Path, handle: str, profile: dict) -> dict:
     total = len({post.id for post in _posts(source_path(account_dir, "posts.jsonl"))})
     return {
         "handle": handle,
-        "user_id": profile["id"],
+        "user_id": str(profile["id"]),
         "originals": {
             "count": original_count,
             "pages": originals.get("pages_fetched", 0),
@@ -62,6 +63,30 @@ def _account_status(output: Path, handle: str, profile: dict) -> dict:
         "unique_posts": total,
         "complete": originals.get("complete", False) and replies.get("complete", False),
     }
+
+
+def _scheduled_profiles(
+    output: Path, query: dict, profiles: dict
+) -> list[tuple[str, dict]]:
+    """Resolve saved task handles without turning historical aliases into tasks."""
+    selected, snapshots, _ = profile_views(output)
+    handles = query.get("handles", list(profiles))
+    resolved = []
+    for handle in handles:
+        profile = profiles.get(handle)
+        if profile is None:
+            candidates = [
+                row["user_id"]
+                for row in snapshots
+                if row["source_key"] == handle or row["username"] == handle
+            ]
+            identifiers = set(candidates)
+            if len(identifiers) != 1:
+                raise ValueError(f"Cannot resolve saved account handle: {handle}")
+            profile = selected[identifiers.pop()]
+        identifier = str(profile["id"])
+        resolved.append((handle, selected[identifier]))
+    return resolved
 
 
 def _write_batch_report(
@@ -160,7 +185,7 @@ def collect_accounts(
         for handle in handles
     }
     canonical = list(dict.fromkeys(profiles))
-    _atomic_json(internal_dir(output) / "profiles.json", profiles)
+    save_profiles(output, profiles)
     query = {
         "kind": "account_batch",
         "handles": canonical,

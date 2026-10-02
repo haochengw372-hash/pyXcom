@@ -9,6 +9,7 @@ _INTERNAL_FILES = (
     "posts.jsonl",
     "state.json",
     "profiles.json",
+    "profile_observations.jsonl",
     "account_manifest.json",
     "report.md",
     "schema.json",
