@@ -4,7 +4,7 @@
 
 Collect public X user profiles, posts, replies, search results and observed network relationships using your existing Chrome, Edge or Safari session. Post datasets contain three linked CSV tables: `users.csv`, `posts.csv` and `comments.csv`; network datasets have separate relationship and snapshot tables.
 
-Version 0.7.0 adds native search, quote discovery, repost activity and follower/following snapshots. These capabilities have passed offline tests and bounded authenticated live endpoint tests. Collection remains limited to results returned by X; the tests do not establish complete historical or network coverage.
+Version 0.7.1 consolidates collection and persistence behavior: readable posts survive mixed source pages, profile history follows stable user IDs, and saved JSONL preserves Unicode text. Search, quote discovery, repost activity and follower/following snapshots remain available. Collection is limited to results returned by X; a completed visible query does not establish complete historical or network coverage. See the [release notes](CHANGELOG.md) and [saved-data rules](docs/stability.md).
 
 The interface follows [PykTok](https://github.com/dfreelon/pyktok)'s approachable get/save convention, with explicit parameters and resumable datasets. pyXcom is an independent implementation; it does not depend on PykTok or twikit.
 
@@ -138,6 +138,8 @@ Discovery pauses when the source keeps changing cursors without useful paginatio
 
 Paused saves retain raw responses and the last cursor. Calling the same save normally preserves the pause without more requests. If you deliberately want to probe the source later, repeat it with `retry_stalled=True` (CLI `--retry-stalled`); this resets the streak without discarding records, raw archives or the cursor. These thresholds are a conservative stopping heuristic and do not prove all historical posts were collected. A fresh query with genuine new source posts continues normally. See [API reference](https://github.com/haochengw372-hash/pyXcom/blob/main/docs/api.md) for the precise stopping and retry contract.
 
+Readable posts on a page are retained even when another tweet slot is unavailable. `manifest.json.source_content` records unavailable or unparsed observations without guessing why content is missing. Known unavailable slots allow paging to continue; unknown shapes pause with `partial_source_content` and retain the request cursor. Reaching the visible end after a content warning remains incomplete; another stop such as `repeated_cursor` can take precedence while the warning stays in the manifest. Memory/iterator methods expose content coverage in `client.last_discovery_collection`; use a save method for a persistent report.
+
 ### Follow networks and reposter lists
 
 Resolve a handle with `get_user(handle).id`, then pass that stable numeric ID to follower/following methods:
@@ -221,6 +223,8 @@ CSV conventions: UTF-8 with BOM, snake_case columns, string IDs (import as text 
 
 If source records include pure reposts, an additional `interactions.csv` preserves them. The current authored-account collector does not establish complete repost activity. `manifest.json` records schema/layout versions, table counts, collection scope, relationship coverage and hashes. `.pyxcom/` must be retained for resuming; the three CSV files can be shared independently for analysis.
 
+`users.csv` groups profiles by stable `user_id`, so a changed handle, biography or counter does not create a second user or invalidate the dataset. It shows the latest valid capture, using field completeness and canonical JSON to resolve equal timestamps deterministically. `profile_snapshots.csv` retains each source-labelled snapshot, including old handles and capture times; `.pyxcom/profile_observations.jsonl` preserves history before the handle-keyed profile view is replaced. Conflicting nonempty account creation timestamps still fail validation. See [saved-data rules](docs/stability.md) for selection and resume behavior.
+
 Saved collection pages also retain platform response JSON under `.pyxcom/raw/` (network pages under their snapshot state) and query provenance in `.pyxcom/collection_log.jsonl`. Repeated post observations keep returned engagement metrics in `metric_snapshots.csv`, with source observations in `.pyxcom/observations.jsonl` and metric history in `.pyxcom/metric_snapshots.jsonl`. Unreturned counts remain unavailable. These are observations at retrieval time, not historical metrics at publication. Credentials are not included in the response archive.
 
 When source records contain reply, quote or repost relationships, `post_edges.csv` exports their directions, source/target post and user IDs, action and observation times, and target availability/resolution flags. An unavailable target is retained; its user ID stays empty if unresolved. Known target authors can appear in `users.csv` as stubs with `profile_available=false`. Context-only records do not create source edges. Relationship, context and metric exports appear when observations provide the corresponding data.
@@ -295,7 +299,7 @@ If you use pyXcom in a paper, thesis, dataset, or other research output, please 
 
 **Suggested reference**
 
-Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 0.7.0) [Computer software]. https://github.com/haochengw372-hash/pyXcom
+Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 0.7.1) [Computer software]. https://github.com/haochengw372-hash/pyXcom
 
 **BibTeX**
 
@@ -304,15 +308,15 @@ Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communi
   author  = {Wang, Haocheng},
   title   = {{pyXcom}: Structured and Auditable X Data Collection for Communication Research},
   year    = {2026},
-  version = {0.7.0},
+  version = {0.7.1},
   url     = {https://github.com/haochengw372-hash/pyXcom}
 }
 ```
 
 For reproducible reporting, also describe the collection dates, account or keyword scope, comment-depth limits, package version, and coverage/stop reasons recorded in the output manifest. No DOI or published-paper citation is currently assigned; this reference cites the software itself. Citation is appreciated and does not add a condition to the MIT license.
 
-For longitudinal profile comparisons use `user_snapshots.csv`; `users.csv` consolidates known profile fields. Canonical post tables keep the first saved observation for each ID; later returned text and metrics remain in observation archives and metric snapshots.
+For longitudinal profiles in post datasets use `profile_snapshots.csv`; network datasets use `user_snapshots.csv`. `users.csv` is the consolidated view. Canonical post tables keep the first saved observation for each ID; later returned text and metrics remain in observation archives and metric snapshots.
 
-Offline development checks: `PYTHONPATH=src python -m pytest -q` and `ruff check src tests examples`. The source distribution includes tests; testing tools are development-only, not runtime dependencies.
+Offline development checks: `PYTHONPATH=src python -m unittest discover -s tests` and `ruff check src tests examples`. The source distribution includes tests; testing tools are development-only, not runtime dependencies.
 
 Live validation: current X SearchTimeline/Followers use POST read queries; Retweeters is discovered from public lazy-loaded TweetActivity assets. If a search source returns posts outside explicit dates, they are excluded locally and `manifest.json.date_scope` records the mismatch. `date_scope.returned_observations` counts source-page observations and `out_of_window_observations` counts those rejected by the local UTC filter. Pages whose records are all out of window do not stop pagination by themselves. An empty bounded result with this warning does not establish historical absence; even `complete=true, reason="source_end"` describes only the visible endpoint's pagination, not historical completeness or proof that no in-window posts exist. Request dates and query operators are preserved rather than silently shifted to compensate for source behavior. Native reposts generate only repost edges; embedded quote/reply context is not attributed as another action by the reposter.

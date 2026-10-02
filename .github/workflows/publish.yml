@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       repository:
-        description: Package index (validate TestPyPI before publishing to PyPI)
+        description: Package index (TestPyPI requires its own configured publisher)
         required: true
         default: testpypi
         type: choice
@@ -32,21 +32,103 @@ jobs:
           python -m pip install --upgrade pip build twine
           python -m build
           python -m twine check dist/*
-      - name: Test the installed wheel
+      - name: Inspect distribution contents
         run: |
-          python -m venv .release-venv
-          .release-venv/bin/python -m pip install dist/*.whl pytest
-          .release-venv/bin/python -m pip check
-          .release-venv/bin/python -m pytest -q
-          .release-venv/bin/pyxcom --help
+          python - <<'PYCODE'
+          from pathlib import Path, PurePosixPath
+          import tarfile
+          import zipfile
+
+          allowed_roots = {
+              "src", "tests", "docs", "examples", "README.md", "pyproject.toml",
+              "LICENSE", "CITATION.cff", "CHANGELOG.md", ".gitignore", "PKG-INFO",
+          }
+          forbidden_parts = {
+              "data", "reset-x-study", ".pyxcom", "__pycache__", ".pytest_cache",
+              ".mypy_cache", ".ruff_cache", ".venv", "node_modules",
+          }
+          forbidden_names = {"pool.py", "provenance.py", "test_pool.py", "test_pool_cli.py", "pool.md"}
+
+          def check(name, *, source=False):
+              path = PurePosixPath(name)
+              if path.is_absolute() or ".." in path.parts:
+                  raise SystemExit(f"Unsafe archive path: {name}")
+              parts = path.parts[1:] if source else path.parts
+              if not parts:
+                  return
+              if source and parts[0] not in allowed_roots:
+                  raise SystemExit(f"Unexpected source distribution file: {name}")
+              if not source and parts[0] != "pyxcom" and not parts[0].endswith(".dist-info"):
+                  raise SystemExit(f"Unexpected wheel file: {name}")
+              for part in parts:
+                  lower = part.lower()
+                  if (part in forbidden_parts or part in forbidden_names
+                          or lower == ".env" or lower.startswith(".env.")
+                          or "cookie" in lower or lower.endswith((".pyc", ".pyo"))):
+                      raise SystemExit(f"Private or draft artifact in distribution: {name}")
+
+          archives = sorted(Path("dist").iterdir())
+          if len(archives) != 2:
+              raise SystemExit("Expected exactly one wheel and one source distribution")
+          for archive in archives:
+              if archive.suffix == ".whl":
+                  with zipfile.ZipFile(archive) as contents:
+                      for name in contents.namelist():
+                          check(name)
+              elif archive.name.endswith(".tar.gz"):
+                  with tarfile.open(archive) as contents:
+                      for member in contents.getmembers():
+                          if not (member.isfile() or member.isdir()):
+                              raise SystemExit(f"Unexpected source archive member: {member.name}")
+                          check(member.name, source=True)
+              else:
+                  raise SystemExit(f"Unexpected distribution: {archive.name}")
+              print(f"Inspected {archive.name}")
+          PYCODE
       - uses: actions/upload-artifact@v4
         with:
           name: python-distributions
           path: dist/*
           if-no-files-found: error
 
-  publish:
+  test-wheel:
     needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+      - name: Test the installed wheel outside the checkout
+        run: |
+          test_dir="$(mktemp -d)"
+          python -m venv "$test_dir/venv"
+          "$test_dir/venv/bin/python" -m pip install "$GITHUB_WORKSPACE"/dist/*.whl
+          "$test_dir/venv/bin/python" -m pip check
+          cp -R tests "$test_dir/tests"
+          cd "$test_dir"
+          "$test_dir/venv/bin/python" -I - <<'PYCODE'
+          from pathlib import Path
+          import sys
+          import pyxcom
+          package_path = Path(pyxcom.__file__).resolve()
+          if not package_path.is_relative_to(Path(sys.prefix).resolve()):
+              raise SystemExit(f"Package imported outside the clean environment: {package_path}")
+          print(f"Testing installed package: {package_path}")
+          PYCODE
+          "$test_dir/venv/bin/python" -I -m unittest discover -s tests -v
+          "$test_dir/venv/bin/pyxcom" --help
+
+  publish:
+    needs: [build, test-wheel]
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.repository }}

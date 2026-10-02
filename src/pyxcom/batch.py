@@ -7,6 +7,8 @@ from pathlib import Path
 from statistics import median
 from typing import TYPE_CHECKING, Callable
 
+from ._persistence import read_jsonl
+
 from .errors import PyXcomError
 from .layout import child_dir, internal_dir, migrate_collection, source_path
 from .models import CollectionResult, Post, Profile
@@ -25,11 +27,7 @@ def _state(path: Path) -> dict:
 def _posts(path: Path) -> list[Post]:
     if not path.exists():
         return []
-    return [
-        Post(**json.loads(line))
-        for line in path.read_text(encoding="utf-8").split("\n")
-        if line.strip()
-    ]
+    return [Post(**record) for record in read_jsonl(path)]
 
 
 def _account_status(output: Path, handle: str, profile: dict) -> dict:

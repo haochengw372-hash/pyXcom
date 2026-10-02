@@ -9,18 +9,11 @@ import uuid
 from dataclasses import fields
 from pathlib import Path
 
+from ._persistence import append_jsonl, atomic_json as _atomic_json, read_jsonl
 from .layout import internal_dir, migrate_collection
 from .models import CollectionResult, Post
 from .transport import now_utc
 from .tables import export_tables
-
-
-def _atomic_json(path: Path, value: dict) -> None:
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    os.replace(temporary, path)
 
 
 class PostStore:
@@ -49,17 +42,14 @@ class PostStore:
             }
         self._posts: dict[str, Post] = {}
         if self._jsonl.exists():
-            for line in self._jsonl.read_text(encoding="utf-8").split("\n"):
-                if line.strip():
-                    post = Post(**json.loads(line))
-                    self._posts[post.id] = post
+            for record in read_jsonl(self._jsonl):
+                post = Post(**record)
+                self._posts[post.id] = post
         self._metrics_path = self._internal / "metric_snapshots.jsonl"
         self._metrics = {}
         if self._metrics_path.exists():
-            for line in self._metrics_path.read_text(encoding="utf-8").split("\n"):
-                if line.strip():
-                    row = json.loads(line)
-                    self._metrics[row["snapshot_id"]] = row
+            for row in read_jsonl(self._metrics_path):
+                self._metrics[row["snapshot_id"]] = row
 
     def archive_response(
         self, payload: dict, *, operation: str, variables: dict
@@ -93,15 +83,10 @@ class PostStore:
         return path
 
     def log(self, **record) -> None:
-        with (self._internal / "collection_log.jsonl").open(
-            "a", encoding="utf-8"
-        ) as stream:
-            stream.write(
-                json.dumps({"timestamp": now_utc(), **record}, ensure_ascii=False)
-                + "\n"
-            )
-            stream.flush()
-            os.fsync(stream.fileno())
+        append_jsonl(
+            self._internal / "collection_log.jsonl",
+            [{"timestamp": now_utc(), **record}],
+        )
 
     def _snapshot(self, post: Post) -> None:
         row = {
@@ -133,10 +118,7 @@ class PostStore:
         key = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
         if key not in self._metrics:
             row["snapshot_id"] = key
-            with self._metrics_path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
-                stream.flush()
-                os.fsync(stream.fileno())
+            append_jsonl(self._metrics_path, [row])
             self._metrics[key] = row
 
     @property
@@ -154,25 +136,21 @@ class PostStore:
     def append_page(
         self, posts: list[Post], next_cursor: str | None, *, count_page: bool = True
     ) -> int:
-        added = 0
-        with self._jsonl.open("a", encoding="utf-8") as file:
-            for post in posts:
-                self._snapshot(post)
-                with (self._internal / "observations.jsonl").open(
-                    "a", encoding="utf-8"
-                ) as observations:
-                    observations.write(
-                        json.dumps(post.to_dict(), ensure_ascii=False) + "\n"
-                    )
-                    observations.flush()
-                    os.fsync(observations.fileno())
-                if post.id in self._posts:
-                    continue
-                file.write(json.dumps(post.to_dict(), ensure_ascii=True) + "\n")
-                self._posts[post.id] = post
-                added += 1
-            file.flush()
-            os.fsync(file.fileno())
+        incoming: dict[str, Post] = {}
+        for post in posts:
+            self._snapshot(post)
+            if post.id not in self._posts and post.id not in incoming:
+                incoming[post.id] = post
+        append_jsonl(
+            self._internal / "observations.jsonl", (post.to_dict() for post in posts)
+        )
+        append_jsonl(
+            self._jsonl,
+            (post.to_dict() for post in incoming.values()),
+            ensure_ascii=True,
+        )
+        self._posts.update(incoming)
+        added = len(incoming)
         self.state.update(
             cursor=next_cursor,
             pages_fetched=self.state["pages_fetched"] + int(count_page),

@@ -7,8 +7,11 @@ from collections import Counter
 from dataclasses import fields
 from pathlib import Path
 
+from ._persistence import read_jsonl
+
 from .layout import internal_dir, migrate_collection, source_path
 from .models import Post, Profile
+from .profiles import profile_views
 from .storage import PostStore, _atomic_json
 from .validate import finalize_collection, validate_collection
 
@@ -68,11 +71,7 @@ RAW_OPTIONAL = [
 
 
 def _read_posts(path: Path) -> list[Post]:
-    return [
-        Post(**json.loads(line))
-        for line in path.read_text(encoding="utf-8").split("\n")
-        if line.strip()
-    ]
+    return [Post(**record) for record in read_jsonl(path)]
 
 
 def schema_summary(output_dir: str | Path) -> dict:
@@ -105,12 +104,8 @@ def schema_summary(output_dir: str | Path) -> dict:
                 ),
             }
         )
-    profiles_path = source_path(output, "profiles.json")
-    profiles = (
-        [Profile(**value) for value in json.loads(profiles_path.read_text()).values()]
-        if profiles_path.exists()
-        else []
-    )
+    selected_profiles, _, _ = profile_views(output)
+    profiles = [Profile(**value) for value in selected_profiles.values()]
     profile_fields = [
         {
             "name": item.name,
@@ -244,11 +239,7 @@ def apply_role_schema(output_dir: str | Path) -> dict:
         state_path = source_path(folder, "state.json")
         if not state_path.exists():
             continue
-        raw = [
-            json.loads(line)
-            for line in path.read_text(encoding="utf-8").split("\n")
-            if line.strip()
-        ]
+        raw = list(read_jsonl(path))
         posts = [Post(**record) for record in raw]
         if all(
             record.get("post_role") == post.post_role

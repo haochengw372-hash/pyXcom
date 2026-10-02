@@ -3,11 +3,10 @@
 import csv
 import hashlib
 import json
-import os
 from dataclasses import fields
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
+from ._persistence import atomic_json, atomic_text, read_jsonl
 from .layout import migrate_collection, source_path
 from .models import Post, Profile
 from .profiles import SNAPSHOT_FIELDS, profile_views
@@ -119,28 +118,18 @@ def _hash(path: Path) -> str:
 
 
 def _write_csv(path: Path, columns: list[str], rows: list[dict]) -> None:
-    with NamedTemporaryFile(
-        "w", encoding="utf-8-sig", newline="", dir=path.parent, delete=False
-    ) as stream:
-        temporary = Path(stream.name)
-        try:
-            writer = csv.DictWriter(stream, fieldnames=columns)
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(
-                    {
-                        key: json.dumps(value, ensure_ascii=False)
-                        if isinstance(value, (list, dict))
-                        else value
-                        for key, value in row.items()
-                    }
-                )
-            stream.flush()
-            os.fsync(stream.fileno())
-        except BaseException:
-            temporary.unlink(missing_ok=True)
-            raise
-    os.replace(temporary, path)
+    with atomic_text(path, encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=columns)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    key: json.dumps(value, ensure_ascii=False)
+                    if isinstance(value, (list, dict))
+                    else value
+                    for key, value in row.items()
+                }
+            )
 
 
 def _depths(records: dict[str, Post]) -> dict[str, tuple[int | None, str]]:
@@ -202,10 +191,7 @@ def export_tables(output_dir: str | Path) -> dict:
     migrate_collection(directory)
     source = source_path(directory, "posts.jsonl")
     records: dict[str, Post] = {}
-    for line in source.read_text(encoding="utf-8").split("\n"):
-        if not line.strip():
-            continue
-        data = json.loads(line)
+    for data in read_jsonl(source):
         for key in (
             "id",
             "author_id",
@@ -340,11 +326,7 @@ def export_tables(output_dir: str | Path) -> dict:
         tables["post_edges.csv"] = (_EDGE, edges)
     metric_source = source_path(directory, "metric_snapshots.jsonl")
     if metric_source.exists():
-        metrics = [
-            json.loads(line)
-            for line in metric_source.read_text(encoding="utf-8").split("\n")
-            if line.strip()
-        ]
+        metrics = list(read_jsonl(metric_source))
         if metrics:
             metric_fields = [
                 "snapshot_id",
@@ -453,10 +435,5 @@ def export_tables(output_dir: str | Path) -> dict:
                 )
             },
         }
-    with NamedTemporaryFile("w", encoding="utf-8", dir=target, delete=False) as stream:
-        temporary = Path(stream.name)
-        json.dump(manifest, stream, ensure_ascii=False, indent=2)
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, target / "manifest.json")
+    atomic_json(target / "manifest.json", manifest)
     return manifest

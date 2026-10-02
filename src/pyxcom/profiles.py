@@ -2,10 +2,10 @@
 
 import hashlib
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+
+from ._persistence import append_jsonl, atomic_json, read_jsonl
 
 from .layout import internal_dir, source_path
 
@@ -31,6 +31,8 @@ def _time(value) -> datetime | None:
 
 
 def _snapshot(entry: dict, source_file: str, source_key: str) -> dict:
+    if not isinstance(entry, dict):
+        raise ValueError("Invalid profile snapshot record: expected an object")
     identifier = entry.get("id")
     if (
         identifier is None
@@ -66,22 +68,23 @@ def _entries(payload, source_file: str) -> list[dict]:
     return [_snapshot(entry, source_file, str(key)) for key, entry in pairs]
 
 
-def _read_snapshots(directory: Path) -> list[dict]:
+def _read_snapshots(
+    directory: Path, *, saved_ids: set[str] | None = None
+) -> list[dict]:
     snapshots = {}
     ledger = source_path(directory, "profile_observations.jsonl")
     if ledger.exists():
-        # JSONL records end at LF. Unicode separators belong to JSON strings.
-        for line in ledger.read_text(encoding="utf-8").split("\n"):
-            if line.strip():
-                row = json.loads(line)
-                verified = _snapshot(
-                    json.loads(row["profile_json"]),
-                    row["source_file"],
-                    row["source_key"],
-                )
-                if row != verified:
-                    raise ValueError("Invalid profile observation metadata")
-                snapshots[row["snapshot_id"]] = row
+        for row in read_jsonl(ledger):
+            verified = _snapshot(
+                json.loads(row["profile_json"]),
+                row["source_file"],
+                row["source_key"],
+            )
+            if row != verified:
+                raise ValueError("Invalid profile observation metadata")
+            snapshots[row["snapshot_id"]] = row
+            if saved_ids is not None:
+                saved_ids.add(row["snapshot_id"])
     path = source_path(directory, "profiles.json")
     if path.exists():
         for row in _entries(
@@ -155,33 +158,15 @@ def save_profiles(output_dir: str | Path, payload: dict) -> None:
     private = internal_dir(directory)
     private.mkdir(parents=True, exist_ok=True)
     path = source_path(directory, "profiles.json")
-    snapshots = {row["snapshot_id"]: row for row in _read_snapshots(directory)}
+    saved: set[str] = set()
+    snapshots = {
+        row["snapshot_id"]: row for row in _read_snapshots(directory, saved_ids=saved)
+    }
     for row in _entries(payload, str(path.relative_to(directory))):
         snapshots[row["snapshot_id"]] = row
     _views(list(snapshots.values()))  # Fail on actual identity conflicts before writes.
     ledger = source_path(directory, "profile_observations.jsonl")
-    saved = set()
-    if ledger.exists():
-        saved = {
-            json.loads(line)["snapshot_id"]
-            for line in ledger.read_text(encoding="utf-8").split("\n")
-            if line.strip()
-        }
-    with ledger.open("a", encoding="utf-8") as stream:
-        for key, row in sorted(snapshots.items()):
-            if key not in saved:
-                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    with NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as stream:
-        temporary = Path(stream.name)
-        try:
-            json.dump(payload, stream, ensure_ascii=False, indent=2)
-            stream.flush()
-            os.fsync(stream.fileno())
-        except BaseException:
-            temporary.unlink(missing_ok=True)
-            raise
-    os.replace(temporary, path)
+    append_jsonl(
+        ledger, (row for key, row in sorted(snapshots.items()) if key not in saved)
+    )
+    atomic_json(path, payload)

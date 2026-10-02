@@ -1,12 +1,13 @@
 """User-facing collection API for public X data."""
 
-import json
 import re
 import time
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Callable, Iterator
+
+from ._persistence import read_jsonl
 
 from .discovery import DiscoveryMixin
 from .networks import NetworkMixin
@@ -375,14 +376,9 @@ class XClient(DiscoveryMixin, NetworkMixin):
             return store.finish(complete=True, reason="both_timelines_complete")
         combined: dict[str, Post] = {}
         for child in (child_dir(output, "originals"), child_dir(output, "replies")):
-            for line in (
-                source_path(child, "posts.jsonl")
-                .read_text(encoding="utf-8")
-                .split("\n")
-            ):
-                if line.strip():
-                    post = Post(**json.loads(line))
-                    combined[post.id] = post
+            for record in read_jsonl(source_path(child, "posts.jsonl")):
+                post = Post(**record)
+                combined[post.id] = post
         store.append_page(list(combined.values()), None)
         store.state["pages_fetched"] = original.pages_fetched + replies.pages_fetched
         return store.finish(
@@ -605,15 +601,12 @@ class XClient(DiscoveryMixin, NetworkMixin):
             return store.finish(complete=True, reason="both_timelines_complete")
         matches: list[Post] = []
         needle = keyword.casefold()
-        for line in (
+        for record in read_jsonl(
             source_path(child_dir(output, "source"), "posts.jsonl")
-            .read_text(encoding="utf-8")
-            .split("\n")
         ):
-            if line.strip():
-                post = Post(**json.loads(line))
-                if needle in post.text.casefold():
-                    matches.append(post)
+            post = Post(**record)
+            if needle in post.text.casefold():
+                matches.append(post)
         if limit is not None:
             matches = matches[: max(0, limit)]
         store.append_page(matches, None)

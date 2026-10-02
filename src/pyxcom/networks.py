@@ -10,6 +10,8 @@ import re
 import time
 from dataclasses import fields
 from pathlib import Path
+
+from ._persistence import append_jsonl
 from typing import TYPE_CHECKING, Any, Iterator
 from uuid import uuid4
 
@@ -498,10 +500,7 @@ class NetworkStore:
             if (self.output / name).exists()
         }
         _atomic_json(manifest_path, manifest)
-        with (self.output / ".pyxcom" / "collection_log.jsonl").open(
-            "a", encoding="utf-8"
-        ) as stream:
-            stream.write(json.dumps(summary, ensure_ascii=False) + "\n")
+        append_jsonl(self.output / ".pyxcom" / "collection_log.jsonl", [summary])
         return CollectionResult(
             self.output,
             listed_user_count,

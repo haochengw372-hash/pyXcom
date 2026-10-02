@@ -5,8 +5,10 @@ import hashlib
 import json
 from pathlib import Path
 
+from ._persistence import jsonl_lines
+
 from .layout import source_path
-from .models import CollectionResult
+from .models import CollectionResult, Post
 from .profiles import profile_views
 from .storage import PostStore, _atomic_json
 from .transport import now_utc
@@ -72,11 +74,11 @@ def validate_collection(output_dir: str | Path) -> dict:
     errors: list[str] = []
     log_path = source_path(output, "collection_log.jsonl")
     if log_path.exists():
-        for line in log_path.read_text(encoding="utf-8").split("\n"):
-            if not line.strip():
-                continue
+        for _, line in jsonl_lines(log_path):
             try:
                 record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise ValueError("Collection log record must be an object")
                 if not record.get("raw_path"):
                     continue
                 raw_path = (output / record["raw_path"]).resolve()
@@ -88,15 +90,32 @@ def validate_collection(output_dir: str | Path) -> dict:
                     errors.append("raw_archive_hash_mismatch:" + record["raw_path"])
             except (ValueError, TypeError, OSError, KeyError):
                 errors.append("invalid_collection_log_record")
-    for number, line in enumerate(
-        (source_path(output, "posts.jsonl")).read_text(encoding="utf-8").split("\n"), 1
-    ):
-        if not line.strip():
-            continue
+    for number, line in jsonl_lines(source_path(output, "posts.jsonl")):
         try:
-            rows.append(json.loads(line))
+            record = json.loads(line)
         except json.JSONDecodeError:
             errors.append(f"invalid_jsonl_line:{number}")
+            continue
+        try:
+            if not isinstance(record, dict):
+                raise ValueError("Post record must be an object")
+            Post(**record)  # Check required fields and supported record keys.
+            for key in ("id", "author_id"):
+                if (
+                    isinstance(record[key], bool)
+                    or not isinstance(record[key], (str, int))
+                    or not str(record[key]).strip()
+                ):
+                    raise ValueError("Post identifiers must be nonempty")
+            if any(
+                not isinstance(record[key], str)
+                for key in ("author_handle", "created_at_utc", "text", "url")
+            ):
+                raise ValueError("Post text fields must be strings")
+        except (ValueError, TypeError, KeyError):
+            errors.append(f"invalid_post_record:{number}")
+            continue
+        rows.append(record)
     with (source_path(output, "posts.csv")).open(
         encoding="utf-8-sig", newline=""
     ) as file:
