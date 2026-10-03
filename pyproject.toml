@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyXcom"
-version = "0.7.1"
+version = "1.0.0"
 description = "Collect public X posts, search results, conversations, reposts, and observed follow networks with your browser session"
 readme = "README.md"
 license = "MIT"

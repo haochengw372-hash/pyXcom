@@ -38,25 +38,25 @@ production releases.
    the release ref and `repository: testpypi`.
 3. Wait for the build and both wheel test jobs to succeed. The build job runs
    `twine check` and inspects the wheel and source archive for research data,
-   cookies, environment files, caches, and unreleased pool modules. Wheel tests
+   cookies, environment files, caches, and unreleased scheduler modules. Wheel tests
    run on Python 3.10 and 3.13 using standard-library `unittest`; no pytest
    dependency is installed. Each job installs the built wheel in a clean virtual
    environment, copies tests to a temporary directory outside the checkout,
    verifies that imports come from that environment, and checks dependencies
    and the CLI. Only then does the publish job upload those exact build artifacts
    using its OIDC identity.
-4. Install the TestPyPI release in a new environment. For version `0.7.1`:
+4. Install the TestPyPI release in a new environment. For version `1.0.0`:
 
    ```bash
-   python3 -m venv /tmp/pyxcom-testpypi-071
-   /tmp/pyxcom-testpypi-071/bin/python -m pip install \
+   python3 -m venv /tmp/pyxcom-testpypi-100
+   /tmp/pyxcom-testpypi-100/bin/python -m pip install \
      'browser-cookie3>=0.19,<1' 'beautifulsoup4>=4.12,<5' 'httpx>=0.27,<1'
-   /tmp/pyxcom-testpypi-071/bin/python -m pip install \
-     --index-url https://test.pypi.org/simple/ --no-deps 'pyXcom==0.7.1'
-   /tmp/pyxcom-testpypi-071/bin/python -m pip check
-   /tmp/pyxcom-testpypi-071/bin/python -c \
+   /tmp/pyxcom-testpypi-100/bin/python -m pip install \
+     --index-url https://test.pypi.org/simple/ --no-deps 'pyXcom==1.0.0'
+   /tmp/pyxcom-testpypi-100/bin/python -m pip check
+   /tmp/pyxcom-testpypi-100/bin/python -c \
      'from importlib.metadata import version; from pyxcom import XClient; print(version("pyXcom"))'
-   /tmp/pyxcom-testpypi-071/bin/pyxcom --help
+   /tmp/pyxcom-testpypi-100/bin/pyxcom --help
    ```
 
    Dependencies come from the normal PyPI index, while the package under test
@@ -81,11 +81,11 @@ After the production jobs succeed, verify the public index in another new virtua
 environment:
 
 ```bash
-python3 -m venv /tmp/pyxcom-pypi-071
-/tmp/pyxcom-pypi-071/bin/python -m pip install --index-url https://pypi.org/simple/ 'pyXcom==0.7.1'
-/tmp/pyxcom-pypi-071/bin/python -m pip check
-/tmp/pyxcom-pypi-071/bin/python -c 'from importlib.metadata import version; from pyxcom import XClient; print(version("pyXcom"))'
-/tmp/pyxcom-pypi-071/bin/pyxcom --help
+python3 -m venv /tmp/pyxcom-pypi-100
+/tmp/pyxcom-pypi-100/bin/python -m pip install --index-url https://pypi.org/simple/ 'pyXcom==1.0.0'
+/tmp/pyxcom-pypi-100/bin/python -m pip check
+/tmp/pyxcom-pypi-100/bin/python -c 'from importlib.metadata import version; from pyxcom import XClient; print(version("pyXcom"))'
+/tmp/pyxcom-pypi-100/bin/pyxcom --help
 ```
 
 The workflow is manually dispatched; pull requests and branch pushes do not
@@ -95,3 +95,9 @@ release locally, or increment the version for changes after publication.
 
 References: [PyPI trusted publishers](https://docs.pypi.org/trusted-publishers/)
 and [PyPA publishing action](https://github.com/pypa/gh-action-pypi-publish).
+
+## 1.0 acceptance gates
+
+In addition to installed-wheel tests, exercise recovery against isolated copies: a stale derived table must prepare and verify without changing source bytes; changed source hashes, unavailable latest checkpoint evidence, invalid generations, and query/binding changes against the frozen plan or previous receipt must remain blocked. Verify that an explicit apply preserves complete/partial state and that an old table replacement is detected by the independent receipt. Do not run release recovery tests against live research directories.
+
+The distribution includes the integrity/recovery library, documentation, and standard-library regression tests. Incomplete multi-account scheduler drafts remain excluded. Publishing does not upgrade or restart an existing research process.

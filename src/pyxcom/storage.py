@@ -13,7 +13,7 @@ from ._persistence import append_jsonl, atomic_json as _atomic_json, read_jsonl
 from .layout import internal_dir, migrate_collection
 from .models import CollectionResult, Post
 from .transport import now_utc
-from .tables import export_tables
+from .tables import _export_tables_unchecked
 
 
 class PostStore:
@@ -23,6 +23,17 @@ class PostStore:
             raise ValueError(
                 "Network snapshots require a separate output directory from post collections"
             )
+        if (self.output_dir / "manifest.json").exists() and (
+            self.output_dir / ".pyxcom" / "posts.jsonl"
+        ).exists():
+            from .errors import IntegrityError
+            from .integrity import assess_recovery
+
+            report = assess_recovery(self.output_dir)
+            if not report.get("resume_allowed", report["allowed"]):
+                raise IntegrityError(
+                    "Source integrity blocks collection: " + "; ".join(report["errors"])
+                )
         migrate_collection(self.output_dir)
         self._internal = internal_dir(self.output_dir)
         self._jsonl = self._internal / "posts.jsonl"
@@ -262,7 +273,9 @@ class PostStore:
             },
         }
         _atomic_json(self._internal / "manifest.json", manifest)
-        export_tables(self.output_dir)
+        # The store was assessed before opening. Its own durable checkpoint and
+        # source writes legitimately advance the original public anchor.
+        _export_tables_unchecked(self.output_dir)
         return CollectionResult(
             output_dir=self.output_dir,
             post_count=len(rows),

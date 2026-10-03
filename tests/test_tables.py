@@ -129,13 +129,23 @@ def case_conflicting_duplicate_ids(tmp_path):
 def case_empty_and_stale_interactions(tmp_path):
     save(tmp_path, [record("1", repost="2")])
     export_tables(tmp_path)
+    old_export = (tmp_path / "interactions.csv").read_bytes()
     save(tmp_path, [])
-    result = export_tables(tmp_path)
+    from pyxcom import IntegrityError
+
+    with raises(IntegrityError, match="integrity"):
+        export_tables(tmp_path)
+    assert (tmp_path / "interactions.csv").read_bytes() == old_export
+    # A fresh, explicit dataset can legitimately be empty.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    save(empty, [])
+    result = export_tables(empty)
     assert result["counts"]["source_records"] == 0
-    assert rows(tmp_path, "posts") == []
-    assert rows(tmp_path, "comments") == []
-    assert rows(tmp_path, "users") == []
-    assert not (tmp_path / "interactions.csv").exists()
+    assert rows(empty, "posts") == []
+    assert rows(empty, "comments") == []
+    assert rows(empty, "users") == []
+    assert not (empty / "interactions.csv").exists()
 
 
 def case_deep_thread_is_iterative(tmp_path):

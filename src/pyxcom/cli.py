@@ -8,6 +8,8 @@ from pathlib import Path
 from .client import XClient
 from .layout import internal_dir
 from .errors import PyXcomError
+from .integrity import assess_recovery
+from .recovery import apply_recovery, prepare_recovery, verify_generation
 from .schema import apply_role_schema, write_schema_report
 from .tables import export_tables
 from .validate import finalize_collection, validate_collection
@@ -62,6 +64,48 @@ def _common_parser() -> argparse.ArgumentParser:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pyxcom", description="Collect public X data")
     commands = parser.add_subparsers(dest="command", required=True)
+    # Recovery commands are offline and never construct a browser client.
+    for name, help_text in (
+        ("assess", "Read-only assessment of a saved dataset's recovery safety"),
+        (
+            "prepare-recovery",
+            "Prepare a verified generation without changing the dataset",
+        ),
+        (
+            "apply-recovery",
+            "Explicitly apply a prepared generation after source checks",
+        ),
+    ):
+        command = commands.add_parser(name, help=help_text)
+        command.add_argument("--output-dir", dest="output", type=Path, required=True)
+        if name in ("assess", "prepare-recovery"):
+            command.add_argument(
+                "--expected-query",
+                type=Path,
+                help="JSON object with the expected saved query",
+            )
+            command.add_argument(
+                "--binding",
+                type=Path,
+                help="JSON object with caller-known public observer binding",
+            )
+            command.add_argument(
+                "--previous-receipt",
+                type=Path,
+                help="Previously verified generation receipt JSON",
+            )
+        if name == "prepare-recovery":
+            command.add_argument(
+                "--plan", type=Path, help="Previously saved assessment JSON"
+            )
+        if name in ("prepare-recovery", "apply-recovery"):
+            command.add_argument("--generation-dir", type=Path, required=True)
+        if name == "apply-recovery":
+            command.add_argument("--receipt-dir", type=Path, required=True)
+    generation = commands.add_parser(
+        "verify-generation", help="Verify a prepared generation offline"
+    )
+    generation.add_argument("--generation-dir", type=Path, required=True)
     common = _common_parser()
     profile = commands.add_parser(
         "user", aliases=["profile"], parents=[common], help="Get public user profile"
@@ -245,10 +289,101 @@ def _write_or_print(value: dict, output: Path | None) -> None:
         print(str(output))
 
 
+def _recovery_json(path: Path | None, label: str) -> dict | None:
+    """Read caller evidence without echoing file content or credential values."""
+    if path is None:
+        return None
+
+    def unique_object(pairs):
+        value = {}
+        for key, child in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON key")
+            value[key] = child
+        return value
+
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=unique_object
+        )
+    except (OSError, UnicodeError, ValueError):
+        raise ValueError(f"{label} must be a readable JSON object") from None
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    forbidden = {
+        "auth_token",
+        "ct0",
+        "cookie",
+        "cookies",
+        "cookie_db",
+        "password",
+        "token",
+        "access_token",
+        "api_key",
+        "secret",
+        "authorization",
+        "headers",
+    }
+
+    def check(item):
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if str(key).lower() in forbidden:
+                    raise ValueError(f"{label} must not contain credentials")
+                check(child)
+        elif isinstance(item, list):
+            for child in item:
+                check(child)
+
+    check(value)
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command in (
+            "assess",
+            "prepare-recovery",
+            "verify-generation",
+            "apply-recovery",
+        ):
+            if args.command in ("assess", "prepare-recovery"):
+                options = {
+                    "expected_query": _recovery_json(
+                        args.expected_query, "expected query"
+                    ),
+                    "binding": _recovery_json(args.binding, "binding"),
+                    "previous_receipt": _recovery_json(
+                        args.previous_receipt, "previous receipt"
+                    ),
+                }
+                if args.command == "assess":
+                    report = assess_recovery(args.output, **options)
+                else:
+                    report = prepare_recovery(
+                        args.output,
+                        plan=_recovery_json(args.plan, "plan"),
+                        generation_dir=args.generation_dir,
+                        **options,
+                    )
+            elif args.command == "verify-generation":
+                report = verify_generation(args.generation_dir)
+            else:
+                report = apply_recovery(
+                    args.output,
+                    generation_dir=args.generation_dir,
+                    receipt_dir=args.receipt_dir,
+                )
+            print(json.dumps(report, ensure_ascii=False))
+            success_key = {
+                "assess": "allowed",
+                "prepare-recovery": "ready",
+                "verify-generation": "valid",
+                "apply-recovery": "applied",
+            }[args.command]
+            return 0 if report.get(success_key) is True else 3
         if args.command == "export":
             print(json.dumps(export_tables(args.output), ensure_ascii=False))
             return 0

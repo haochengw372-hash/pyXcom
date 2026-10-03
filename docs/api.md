@@ -1,8 +1,8 @@
-# Public API — pyXcom 0.7.1
+# Public API — pyXcom 1.0.0
 
 The native discovery and network methods have passed offline tests and bounded authenticated live endpoint tests. These tests verify the exercised acquisition paths, not complete historical or network coverage.
 
-Import `XClient`, `Profile`, `Post`, `CollectionResult`, `PyXcomError`, `AuthenticationError`, `APIError`, and `RateLimitError` from `pyxcom`.
+Import `XClient`, `Profile`, `Post`, `CollectionResult`, `PyXcomError`, `AuthenticationError`, `APIError`, `RateLimitError`, and `IntegrityError` from `pyxcom`.
 
 ## Client
 
@@ -49,6 +49,8 @@ save_users_activity(handles, output_dir, *, since, until, pages_per_round=5,
 ```
 
 `handle: str`; `handles: list[str]`; `output_dir: str | Path`. Dates are `str | None` in YYYY-MM-DD UTC. `max_pages` and `limit` are positive `int | None`. `progress` is an optional callable taking a dictionary. `get`/`iter` start a fresh traversal; `save` resumes the same dataset query. `limit` on a saved timeline/mirror search is checked after a page; it may overshoot. Account activity and multi-account saves intentionally have no total-record `limit`.
+
+If `save_user_posts` encounters `APIError`, it preserves the saved cursor, page count, and metric observations, writes an incomplete finish with `reason="api_error"` and `error_type`, then re-raises the original exception. A successful subsequent call clears `error_type`. This allows an interrupted endpoint request to remain visible without implying collection completion.
 
 `user_posts` defaults to original/quote main posts. `user_replies` returns authored replies, including self-replies. Neither is an API to retrieve a main post's entire received comment tree. `timeline` is a compatibility option for selecting the source stream.
 
@@ -165,9 +167,30 @@ write_schema_report(output_dir: str | Path) -> dict
 apply_role_schema(output_dir: str | Path) -> dict
 ```
 
-Export/finalization migrate legacy files with backups and regenerate public tables. Validation never fetches X data. `validate_collection` checks internal observations and public tables; `validate_tables` checks normalized relationships, source/file hashes and counts. Reports describe missing ancestry explicitly. `schema_summary` describes the internal standard Post/Profile fields, not only the normalized table columns.
+Export/finalization migrate recognized legacy files with backups and regenerate public tables when their saved source integrity is established. They raise `IntegrityError` when a source hash, checkpoint, or required source record cannot be justified; ordinary export is not a source-repair mechanism. Validation never fetches X data. `validate_collection` checks internal observations and public tables; `validate_tables` checks normalized relationships, source/file hashes and counts. Reports describe missing ancestry explicitly. `schema_summary` describes the internal standard Post/Profile fields, not only the normalized table columns.
 
 Post export/finalization/schema helpers operate on post datasets. `validate_collection` automatically recognizes network datasets; `validate_network_collection` explicitly verifies network snapshot hashes, directions and provenance. To resume or regenerate network exports, repeat the corresponding network `save_*` call.
+
+## Explicit recovery generations
+
+```python
+assess_recovery(output_dir, *, expected_query=None, binding=None,
+                previous_receipt=None) -> dict
+prepare_recovery(output_dir, *, plan=None, generation_dir,
+                 expected_query=None, binding=None, previous_receipt=None) -> dict
+verify_generation(generation_dir) -> dict
+apply_recovery(output_dir, *, generation_dir, receipt_dir) -> dict
+```
+
+These functions are exported from `pyxcom` and never construct an `XClient` or fetch network data. `expected_query`, `binding`, `previous_receipt`, and `plan` are dictionaries or `None`. Supply saved query values unchanged. `binding` is a caller-provided provenance annotation containing public observer metadata, never authentication cookies. It is compared with a supplied plan/previous receipt; it does not authenticate historical logins, verify an observer for each saved page, or backfill unlabelled history. The package does not rewrite source binding or query values.
+
+Assessment reads the dataset and returns `allowed` plus evidence/errors. Source integrity and resumability are assessed separately; supported checkpoint replay checks saved request/response provenance. Unsupported or insufficient replay evidence blocks recovery rather than establishing that a source is current. `previous_receipt` adds an independent retained-generation comparison. Preparation takes a generation parent directory and returns `ready`, the exact child `generation_dir`, `receipt_path`, and `generation_id`, preserving sources and producing a separate full dataset copy. Verification/application require that returned child directory. Verification returns `valid`, `errors`, and `receipt`; application returns `applied`, `receipt_path`, and `generation_id` after rechecking the source and prepared generation.
+
+A verified old archive with a retained source tail that was never published can be classified as `latest_checkpoint="incomplete_publication"`, with `allowed=false` for derived recovery. A supported UserTimeline tail may separately have `resume_allowed=true` when complete raw responses, request cursor, append prefix, observations, and metrics independently justify the saved continuation and stable inputs have no other query/receipt conflict. PostStore can then resume the original collection; `prepare_recovery()` and ordinary re-export remain blocked from rewriting the old private anchor. Unknown tails or regressed sources have `resume_allowed=false`. Assessment neither rewrites that anchor nor invents a finish record.
+
+Preparation/application require normalized post collections; network snapshots and legacy layouts are unsupported. Recovery is limited to derived tables and their publication metadata. A missing or regressed source archive, unavailable latest checkpoint, mismatched query/binding, changed source after preparation, or invalid generation prevents application. Completion and stop reasons are preserved. Keep the generation and receipt directories outside the source dataset and preferably outside synchronization. Recovery application locks coordinate cooperating recovery callers; collectors, legacy code, and external writers are not controlled. Coordinate or stop other writers before applying. Verification provides point-in-time evidence, not protection against future file replacement. See [recovery workflow](recovery.md).
+
+CLI equivalents are `assess`, `prepare-recovery`, `verify-generation`, and explicit `apply-recovery`. All return JSON. Exit 0 means the respective `allowed`/`ready`/`valid`/`applied` flag is true, 3 means a blocked/invalid report, and 2 means an operational or input error. `--expected-query`, `--binding`, `--previous-receipt`, and `--plan` take JSON-object files; `--generation-dir` and `--receipt-dir` are explicit destinations.
 
 ## Backward-compatible names
 

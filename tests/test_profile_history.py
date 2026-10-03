@@ -2,6 +2,7 @@ import csv
 import hashlib
 import json
 import tempfile
+import shutil
 import unittest
 from pathlib import Path
 
@@ -83,8 +84,11 @@ class ProfileHistoryTests(unittest.TestCase):
         export_tables(self.directory)
         before = (self.directory / "users.csv").read_bytes()
         self.write({"old": self.old, "new": self.new})
-        export_tables(self.directory)
-        self.assertEqual((self.directory / "users.csv").read_bytes(), before)
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp)
+            shutil.copytree(self.directory / ".pyxcom", other / ".pyxcom")
+            export_tables(other)
+            self.assertEqual((other / "users.csv").read_bytes(), before)
 
     def test_same_timestamp_is_audited_and_deterministic(self):
         self.new["captured_at_utc"] = self.old["captured_at_utc"]
@@ -92,8 +96,11 @@ class ProfileHistoryTests(unittest.TestCase):
         report = export_tables(self.directory)
         before = (self.directory / "users.csv").read_bytes()
         self.write([self.old, self.new])
-        export_tables(self.directory)
-        self.assertEqual((self.directory / "users.csv").read_bytes(), before)
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp)
+            shutil.copytree(self.directory / ".pyxcom", other / ".pyxcom")
+            export_tables(other)
+            self.assertEqual((other / "users.csv").read_bytes(), before)
         self.assertEqual(
             report["profile_observations"]["tied_latest_user_ids"], ["99204810"]
         )
@@ -272,7 +279,9 @@ class ProfileHistoryTests(unittest.TestCase):
             profile_views(self.directory)
         with self.assertRaises(json.JSONDecodeError):
             save_profiles(self.directory, {"same": self.new})
-        with self.assertRaises(json.JSONDecodeError):
+        from pyxcom import IntegrityError
+
+        with self.assertRaises(IntegrityError):
             export_tables(self.directory)
         self.assertFalse(validate_collection(self.directory)["valid"])
         self.assertEqual((ledger.read_bytes(), self.path.read_bytes()), before)

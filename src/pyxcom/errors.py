@@ -27,3 +27,7 @@ class RateLimitError(APIError):
 
 class ParseError(PyXcomError):
     """The response shape changed or omitted expected data."""
+
+
+class IntegrityError(PyXcomError, ValueError):
+    """Saved sources or a recovery generation cannot be safely accepted."""

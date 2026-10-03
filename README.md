@@ -4,7 +4,9 @@
 
 Collect public X user profiles, posts, replies, search results and observed network relationships using your existing Chrome, Edge or Safari session. Post datasets contain three linked CSV tables: `users.csv`, `posts.csv` and `comments.csv`; network datasets have separate relationship and snapshot tables.
 
-Version 0.7.1 consolidates collection and persistence behavior: readable posts survive mixed source pages, profile history follows stable user IDs, and saved JSONL preserves Unicode text. Search, quote discovery, repost activity and follower/following snapshots remain available. Collection is limited to results returned by X; a completed visible query does not establish complete historical or network coverage. See the [release notes](CHANGELOG.md) and [saved-data rules](docs/stability.md).
+Version 1.0.0 keeps the get/save API and adds explicit saved-data integrity assessment and guarded recovery generations. Readable posts survive mixed source pages, profile history follows stable user IDs, and JSONL preserves Unicode text. See the [release notes](CHANGELOG.md), [saved-data rules](docs/stability.md), and [recovery workflow](docs/recovery.md).
+
+The author reports field use with approximately 130,000 collected records. This experience informed the persistence and recovery checks; it is not a benchmark, a verified unique-post total, or proof of complete historical coverage. Collection remains limited to results returned by X.
 
 The interface follows [PykTok](https://github.com/dfreelon/pyktok)'s approachable get/save convention, with explicit parameters and resumable datasets. pyXcom is an independent implementation; it does not depend on PykTok or twikit.
 
@@ -265,7 +267,7 @@ from pyxcom import export_tables, validate_collection, finalize_collection
 
 export_tables("output/ai_year")
 print(validate_collection("output/ai_year"))
-# Rebuild an interrupted dataset from its saved observations:
+# Rebuild only when the saved source passes integrity checks:
 finalize_collection("output/ai_year")
 ```
 
@@ -277,6 +279,41 @@ pyxcom schema --output-dir output/ai_year
 ```
 
 Opening/exporting a legacy dataset migrates its recognized internal files into `.pyxcom/`, with originals backed up under `.pyxcom/legacy/`. It publishes the three tables at the root; the previous mixed `posts.csv` is retained internally. Unrelated user files are left in place. Conflicting migration destinations fail rather than overwrite. `schema --apply` also backfills classification fields in older records; field reports live under `.pyxcom/`.
+
+## Check saved data and recover derived files
+
+Keep active collection data outside directories with file synchronization. Save the full `.pyxcom/` source archive; CSV files alone cannot establish the checkpoint used for resuming.
+
+```python
+from pyxcom import assess_recovery, prepare_recovery, verify_generation, apply_recovery
+
+plan = assess_recovery("output/ai_year")  # Reads only; does not repair or fetch X.
+if plan["allowed"]:
+    prepared = prepare_recovery(
+        "output/ai_year", plan=plan,
+        generation_dir="/local/archive/ai_year-generation-1",
+    )
+    checked = verify_generation(prepared["generation_dir"])
+    if checked["valid"]:
+        # Explicit application after reviewing the assessment:
+        applied = apply_recovery(
+            "output/ai_year", generation_dir=prepared["generation_dir"],
+            receipt_dir="/local/archive/receipts",
+        )
+```
+
+Prepare a generation and receipts outside the active dataset and, where possible, outside synchronized directories. Assessment refuses unknown or mismatched source integrity; it does not rebuild lost source records, guess a cursor, or backfill an observer identity. `allowed` concerns derived recovery; a separately justified unpublished timeline tail may have `resume_allowed=true` for original collection continuation while export/recovery remain blocked. Application rechecks source hashes and changes only approved derived files. It preserves the collection's incomplete status and stop reason. `export_tables()` and `finalize_collection()` raise `IntegrityError` for unsafe saved sources rather than legitimizing missing records with a new manifest.
+
+```bash
+pyxcom assess --output-dir output/ai_year
+pyxcom prepare-recovery --output-dir output/ai_year --generation-dir /local/archive/generations
+# Use the exact generation_dir returned by prepare-recovery:
+pyxcom verify-generation --generation-dir /local/archive/generations/generation-ID
+pyxcom apply-recovery --output-dir output/ai_year --generation-dir /local/archive/generations/generation-ID \
+  --receipt-dir /local/archive/receipts
+```
+
+All four commands are offline. A blocked assessment or invalid generation returns a nonzero exit code. Recovery locks coordinate cooperating recovery callers; they cannot stop collectors, legacy processes, or external synchronization from replacing files. Coordinate or stop other writers before application. Recheck retained receipts before using a generation in analysis. See [recovery](docs/recovery.md) for query/binding checks, checkpoint replay limits, and recovery acceptance criteria.
 
 ## Compatibility and limitations
 
@@ -299,7 +336,7 @@ If you use pyXcom in a paper, thesis, dataset, or other research output, please 
 
 **Suggested reference**
 
-Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 0.7.1) [Computer software]. https://github.com/haochengw372-hash/pyXcom
+Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 1.0.0) [Computer software]. https://github.com/haochengw372-hash/pyXcom
 
 **BibTeX**
 
@@ -308,7 +345,7 @@ Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communi
   author  = {Wang, Haocheng},
   title   = {{pyXcom}: Structured and Auditable X Data Collection for Communication Research},
   year    = {2026},
-  version = {0.7.1},
+  version = {1.0.0},
   url     = {https://github.com/haochengw372-hash/pyXcom}
 }
 ```

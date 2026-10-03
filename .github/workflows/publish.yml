@@ -47,7 +47,8 @@ jobs:
               "data", "reset-x-study", ".pyxcom", "__pycache__", ".pytest_cache",
               ".mypy_cache", ".ruff_cache", ".venv", "node_modules",
           }
-          forbidden_names = {"pool.py", "provenance.py", "test_pool.py", "test_pool_cli.py", "pool.md"}
+          # Unreleased scheduler drafts are excluded; integrity/recovery modules ship.
+          forbidden_names = {"pool.py", "test_pool.py", "test_pool_cli.py", "pool.md"}
 
           def check(name, *, source=False):
               path = PurePosixPath(name)

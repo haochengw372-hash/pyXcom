@@ -82,11 +82,21 @@ class ProfileBatchTests(unittest.TestCase):
                 output,
                 {"newname": profile("newname", "2026-10-02T00:00:00+00:00")},
             )
-            resumed = finalize_collection(output)
-            self.assertTrue(resumed.complete)
-            self.assertEqual(resumed.pages_fetched, 4)
-            validation = validate_collection(output)
-            self.assertTrue(validation["valid"], validation["errors"])
+            from pyxcom import IntegrityError
+            from pyxcom.batch import _scheduled_profiles, _account_status
+
+            with self.assertRaises(IntegrityError):
+                finalize_collection(output)
+            # A changed source file cannot be silently re-anchored by finalize,
+            # but resolving historic task handles still preserves their directories.
+            current = json.loads(source_path(output, "profiles.json").read_text())
+            scheduled = _scheduled_profiles(output, query, current)
+            self.assertEqual([handle for handle, _ in scheduled], ["oldname"])
+            status = _account_status(output, *scheduled[0])
+            self.assertTrue(status["complete"])
+            self.assertEqual(
+                status["originals"]["pages"] + status["replies"]["pages"], 4
+            )
             manifest["accounts"].append({"handle": "newname"})
             _atomic_json(source_path(output, "account_manifest.json"), manifest)
             self.assertIn(

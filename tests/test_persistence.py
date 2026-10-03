@@ -160,7 +160,7 @@ class PersistenceTests(unittest.TestCase):
                 )
 
             store.append_page([post("1")], "cursor")
-            store.finish(complete=False, reason="page_limit")
+            store.log(operation="test_checkpoint")
             paths = [
                 directory / ".pyxcom" / name
                 for name in (
@@ -174,6 +174,9 @@ class PersistenceTests(unittest.TestCase):
             for path in paths:
                 path.write_bytes(path.read_bytes().rstrip(b"\n"))
                 before[path] = path.read_bytes()
+            # Anchor the valid no-final-LF source bytes before any resume.
+            # Altering already anchored sources must instead trigger integrity gates.
+            store.finish(complete=False, reason="page_limit")
             resumed = PostStore(directory, query=store.state["query"])
             resumed.append_page([post("2")], "next")
             resumed.finish(complete=False, reason="page_limit")

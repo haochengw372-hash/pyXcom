@@ -182,6 +182,24 @@ def _depths(records: dict[str, Post]) -> dict[str, tuple[int | None, str]]:
 
 
 def export_tables(output_dir: str | Path) -> dict:
+    """Rebuild public tables only when saved sources pass integrity assessment."""
+    directory = Path(output_dir).expanduser()
+    # Existing modern public manifests are integrity anchors. Fresh/legacy
+    # inputs retain their original migration path and remain explicitly unanchored.
+    manifest_path = directory / "manifest.json"
+    if manifest_path.exists() and (directory / ".pyxcom" / "posts.jsonl").exists():
+        from .errors import IntegrityError
+        from .integrity import assess_recovery
+
+        report = assess_recovery(directory)
+        if not report["allowed"]:
+            raise IntegrityError(
+                "Source integrity blocks re-export: " + "; ".join(report["errors"])
+            )
+    return _export_tables_unchecked(directory)
+
+
+def _export_tables_unchecked(output_dir: str | Path) -> dict:
     """Write public relational CSV tables at the collection root."""
     directory = Path(output_dir).expanduser()
     if (directory / "network_manifest.json").exists():

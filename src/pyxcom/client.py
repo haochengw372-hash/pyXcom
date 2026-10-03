@@ -282,6 +282,18 @@ class XClient(DiscoveryMixin, NetworkMixin):
             except RateLimitError as exc:
                 store.state["rate_reset_at"] = exc.reset_at
                 return store.finish(complete=False, reason="rate_limited")
+            except APIError as exc:
+                # Committed pages survive the request failure. Publish the
+                # corresponding incomplete checkpoint before preserving the
+                # existing exception contract for the caller's retry policy.
+                store.state["error_type"] = type(exc).__name__
+                store.log(
+                    operation="api_error",
+                    timeline=timeline,
+                    error_type=type(exc).__name__,
+                )
+                store.finish(complete=False, reason="api_error")
+                raise
             store.archive_response(
                 payload,
                 operation="user_timeline",
@@ -308,6 +320,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             ]
             next_cursor = bottom_cursor(payload)
             store.state.pop("rate_reset_at", None)
+            store.state.pop("error_type", None)
             store.append_page(filtered, next_cursor)
             pages_this_run += 1
             if (
