@@ -254,6 +254,11 @@ class PostStore:
                 else {}
             ),
             **(
+                {"timeline_pagination": self.state["timeline_pagination"]}
+                if "timeline_pagination" in self.state
+                else {}
+            ),
+            **(
                 {"source_content": self.state["source_content"]}
                 if "source_content" in self.state
                 else {}

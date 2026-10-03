@@ -1,4 +1,4 @@
-# Public API — pyXcom 1.0.0
+# Public API — pyXcom 1.0.1
 
 The native discovery and network methods have passed offline tests and bounded authenticated live endpoint tests. These tests verify the exercised acquisition paths, not complete historical or network coverage.
 
@@ -53,6 +53,10 @@ save_users_activity(handles, output_dir, *, since, until, pages_per_round=5,
 If `save_user_posts` encounters `APIError`, it preserves the saved cursor, page count, and metric observations, writes an incomplete finish with `reason="api_error"` and `error_type`, then re-raises the original exception. A successful subsequent call clears `error_type`. This allows an interrupted endpoint request to remain visible without implying collection completion.
 
 `user_posts` defaults to original/quote main posts. `user_replies` returns authored replies, including self-replies. Neither is an API to retrieve a main post's entire received comment tree. `timeline` is a compatibility option for selecting the source stream.
+
+Account timelines track primary platform IDs before date, role and author filters. After five consecutive pages with no new source ID, a save pauses with `reason="no_progress_limit"` and `complete=False`. Source IDs and counters persist across calls in `.pyxcom/state.json`; `manifest.json.timeline_pagination` summarizes the separate account-timeline audit. Repeating the paused save does not request more timeline pages or clear its counters. Memory `get`/`iter` traversal raises `APIError` on this pause. Explicit `TimelinePinEntry` or `socialContext.contextType="Pin"` items remain in collected records when in scope but are excluded from the `passed_since` date test. That test requires two consecutive pages with fresh ordinary authored items all older than `since`, and persists across save budgets; repeating an old body or returning only a pin does not establish the boundary.
+
+For checkpoints without timeline counters, the package replays the complete retained successful response history only after checking raw hashes, request scope, cursor chain and final saved cursor. This can recognize an already stalled task without a new timeline request. If full history is unavailable, tracking begins with the next returned page; historical progress is not guessed. Bootstrap does not retroactively declare completion from old date bounds. No automatic retry/reset option is added to the timeline API: preserve evidence and plan a separate traversal if a paused source must be probed again. This is a no-progress heuristic and does not establish historical completeness. See [timeline pagination](timeline-pagination.md).
 
 ## Comments received by a post or reply
 

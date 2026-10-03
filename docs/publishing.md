@@ -45,18 +45,18 @@ production releases.
    verifies that imports come from that environment, and checks dependencies
    and the CLI. Only then does the publish job upload those exact build artifacts
    using its OIDC identity.
-4. Install the TestPyPI release in a new environment. For version `1.0.0`:
+4. Install the TestPyPI release in a new environment. For version `1.0.1`:
 
    ```bash
-   python3 -m venv /tmp/pyxcom-testpypi-100
-   /tmp/pyxcom-testpypi-100/bin/python -m pip install \
+   python3 -m venv /tmp/pyxcom-testpypi-101
+   /tmp/pyxcom-testpypi-101/bin/python -m pip install \
      'browser-cookie3>=0.19,<1' 'beautifulsoup4>=4.12,<5' 'httpx>=0.27,<1'
-   /tmp/pyxcom-testpypi-100/bin/python -m pip install \
-     --index-url https://test.pypi.org/simple/ --no-deps 'pyXcom==1.0.0'
-   /tmp/pyxcom-testpypi-100/bin/python -m pip check
-   /tmp/pyxcom-testpypi-100/bin/python -c \
+   /tmp/pyxcom-testpypi-101/bin/python -m pip install \
+     --index-url https://test.pypi.org/simple/ --no-deps 'pyXcom==1.0.1'
+   /tmp/pyxcom-testpypi-101/bin/python -m pip check
+   /tmp/pyxcom-testpypi-101/bin/python -c \
      'from importlib.metadata import version; from pyxcom import XClient; print(version("pyXcom"))'
-   /tmp/pyxcom-testpypi-100/bin/pyxcom --help
+   /tmp/pyxcom-testpypi-101/bin/pyxcom --help
    ```
 
    Dependencies come from the normal PyPI index, while the package under test
@@ -81,11 +81,11 @@ After the production jobs succeed, verify the public index in another new virtua
 environment:
 
 ```bash
-python3 -m venv /tmp/pyxcom-pypi-100
-/tmp/pyxcom-pypi-100/bin/python -m pip install --index-url https://pypi.org/simple/ 'pyXcom==1.0.0'
-/tmp/pyxcom-pypi-100/bin/python -m pip check
-/tmp/pyxcom-pypi-100/bin/python -c 'from importlib.metadata import version; from pyxcom import XClient; print(version("pyXcom"))'
-/tmp/pyxcom-pypi-100/bin/pyxcom --help
+python3 -m venv /tmp/pyxcom-pypi-101
+/tmp/pyxcom-pypi-101/bin/python -m pip install --index-url https://pypi.org/simple/ 'pyXcom==1.0.1'
+/tmp/pyxcom-pypi-101/bin/python -m pip check
+/tmp/pyxcom-pypi-101/bin/python -c 'from importlib.metadata import version; from pyxcom import XClient; print(version("pyXcom"))'
+/tmp/pyxcom-pypi-101/bin/pyxcom --help
 ```
 
 The workflow is manually dispatched; pull requests and branch pushes do not

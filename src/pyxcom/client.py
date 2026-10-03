@@ -1,5 +1,7 @@
 """User-facing collection API for public X data."""
 
+import hashlib
+import json
 import re
 import time
 from dataclasses import replace
@@ -9,17 +11,17 @@ from typing import Callable, Iterator
 
 from ._persistence import read_jsonl
 
-from .discovery import DiscoveryMixin
+from .discovery import DiscoveryMixin, _record_source_page, _source_page
 from .networks import NetworkMixin
 from .auth import load_x_cookies
 from .profiles import save_profiles as _save_profiles
-from .errors import APIError, RateLimitError
+from .errors import APIError, IntegrityError, RateLimitError
 from .layout import child_dir, migrate_collection, source_path
 from .models import CollectionResult, Post, Profile
 from .parse import bottom_cursor, timeline_primary_posts
 from .search import MirrorSearch
 from .storage import PostStore
-from .transport import TWEET_FEATURES, XTransport, now_utc
+from .transport import TWEET_FEATURES, XTransport
 
 _HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 _POST_ID = re.compile(r"(?:/status/)?(\d{10,25})(?:\D.*)?$")
@@ -63,6 +65,76 @@ def _page_options(max_pages: int | None, limit: int | None) -> None:
 def _within(post: Post, since: str | None, until: str | None) -> bool:
     day = post.created_at_utc[:10]
     return (since is None or day >= since) and (until is None or day < until)
+
+
+def _timeline_progress(state: dict, payload: dict, user_id: str, since: str | None):
+    """Track source novelty separately from local sampling and explicit pins."""
+    details: dict = {}
+    primary, source_empty = _source_page(payload, audit=details)
+    previous_ids = set(state.get("timeline_source_ids", []))
+    reason = _record_source_page(
+        state, primary, source_empty,
+        source_ids=set(details["source_post_ids"]),
+        ended=bottom_cursor(payload) is None, namespace="timeline",
+    )
+    audit = state["timeline_pagination"]
+    ordinary = [
+        post for post in timeline_primary_posts(payload, include_pinned=False)
+        if post.author_id == user_id
+    ]
+    # Repeating an old body page is evidence of stalled pagination, not a second
+    # independently traversed page beyond the sampling boundary.
+    fresh_ordinary = any(post.id not in previous_ids for post in ordinary)
+    audit["consecutive_old_pages"] = (
+        audit.get("consecutive_old_pages", 0) + 1
+        if since and ordinary and fresh_ordinary
+        and max(post.created_at_utc[:10] for post in ordinary) < since else 0
+    )
+    return primary, reason
+
+
+def _seed_timeline_progress(store: PostStore, user_id: str) -> None:
+    """Replay complete saved page evidence once for pre-counter checkpoints."""
+    if "timeline_pagination" in store.state:
+        return
+    log_path = source_path(store.output_dir, "collection_log.jsonl")
+    if not log_path.exists():
+        return
+    responses = [
+        row for row in read_jsonl(log_path)
+        if row.get("operation") == "user_timeline"
+        and row.get("status") == "response_received"
+    ]
+    if not responses or len(responses) != store.state["pages_fetched"]:
+        return
+    replay: dict = {}
+    query = store.state["query"]
+    cursor = None
+    for row in responses:
+        variables = row.get("variables", {})
+        name = row.get("raw_path", "")
+        path = Path(name)
+        if (
+            not isinstance(name, str) or not name.startswith(".pyxcom/raw/")
+            or ".." in path.parts or path.is_absolute()
+            or str(variables.get("userId")) != user_id
+            or variables.get("timeline") != query["timeline"]
+            or variables.get("cursor") != cursor
+        ):
+            raise IntegrityError("Timeline pagination history scope or cursor mismatch")
+        raw = store.output_dir / path
+        if raw.is_symlink():
+            raise IntegrityError("Timeline pagination history cannot follow symbolic links")
+        encoded = raw.read_bytes()
+        if hashlib.sha256(encoded).hexdigest() != row.get("raw_sha256"):
+            raise IntegrityError("Timeline pagination history raw hash mismatch")
+        payload = json.loads(encoded)
+        _timeline_progress(replay, payload, user_id, query.get("since"))
+        cursor = bottom_cursor(payload)
+    if cursor != store.cursor:
+        raise IntegrityError("Timeline pagination history does not reach saved cursor")
+    store.state.update(replay)
+    store.log(operation="timeline_pagination_seeded", response_pages=len(responses))
 
 
 class XClient(DiscoveryMixin, NetworkMixin):
@@ -165,8 +237,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
         seen_cursors: set[str] = set()
         pages = 0
         yielded = 0
-        old_pages = 0
-        empty_pages = 0
+        pagination: dict = {}
         while True:
             if cursor and cursor in seen_cursors:
                 return
@@ -175,11 +246,8 @@ class XClient(DiscoveryMixin, NetworkMixin):
             payload = self._x.user_timeline_page(
                 profile.id, timeline=timeline, cursor=cursor
             )
-            authored = [
-                post
-                for post in timeline_primary_posts(payload, captured_at_utc=now_utc())
-                if post.author_id == profile.id
-            ]
+            primary, pause_reason = _timeline_progress(pagination, payload, profile.id, since)
+            authored = [post for post in primary if post.author_id == profile.id]
             for post in authored:
                 if post.post_role != ("comment" if timeline == "replies" else "main"):
                     continue
@@ -195,20 +263,14 @@ class XClient(DiscoveryMixin, NetworkMixin):
                 if limit and yielded >= limit:
                     return
             pages += 1
-            if (
-                since
-                and authored
-                and max(post.created_at_utc[:10] for post in authored) < since
-            ):
-                old_pages += 1
-            else:
-                old_pages = 0
-            empty_pages = empty_pages + 1 if not authored else 0
+            if pause_reason:
+                raise APIError("User timeline pagination paused: " + pause_reason)
+            audit = pagination["timeline_pagination"]
             cursor = bottom_cursor(payload)
             if (
                 not cursor
-                or old_pages >= 2
-                or empty_pages >= 2
+                or audit["consecutive_old_pages"] >= 2
+                or audit["consecutive_source_empty_pages"] >= 2
                 or (max_pages and pages >= max_pages)
             ):
                 return
@@ -261,15 +323,18 @@ class XClient(DiscoveryMixin, NetworkMixin):
         }
         store = PostStore(output_dir, query=query)
         store.retain_role("comment" if timeline == "replies" else "main")
-        if query["kind"] == "user_timeline":
-            _save_profiles(output_dir, {profile.handle: profile.to_dict()})
         if store.complete:
+            _save_profiles(output_dir, {profile.handle: profile.to_dict()})
             return store.finish(complete=True, reason=store.state["reason"])
+        _seed_timeline_progress(store, profile.id)
+        if store.state.get("timeline_pagination", {}).get("status") == "paused":
+            return store.finish(
+                complete=False, reason=store.state["timeline_pagination"]["stop_reason"]
+            )
+        _save_profiles(output_dir, {profile.handle: profile.to_dict()})
         cursor = store.cursor
         seen_cursors: set[str] = set()
         pages_this_run = 0
-        old_pages = 0
-        empty_pages = 0
         while True:
             if cursor and cursor in seen_cursors:
                 return store.finish(complete=False, reason="repeated_cursor")
@@ -303,11 +368,8 @@ class XClient(DiscoveryMixin, NetworkMixin):
                     "cursor": cursor,
                 },
             )
-            authored = [
-                post
-                for post in timeline_primary_posts(payload, captured_at_utc=now_utc())
-                if post.author_id == profile.id
-            ]
+            primary, pause_reason = _timeline_progress(store.state, payload, profile.id, since)
+            authored = [post for post in primary if post.author_id == profile.id]
             filtered = [
                 replace(
                     post,
@@ -323,20 +385,14 @@ class XClient(DiscoveryMixin, NetworkMixin):
             store.state.pop("error_type", None)
             store.append_page(filtered, next_cursor)
             pages_this_run += 1
-            if (
-                since
-                and authored
-                and max(post.created_at_utc[:10] for post in authored) < since
-            ):
-                old_pages += 1
-            else:
-                old_pages = 0
-            empty_pages = empty_pages + 1 if not authored else 0
+            audit = store.state["timeline_pagination"]
             if not next_cursor:
                 return store.finish(complete=True, reason="source_end")
-            if old_pages >= 2:
+            if pause_reason:
+                return store.finish(complete=False, reason=pause_reason)
+            if audit["consecutive_old_pages"] >= 2:
                 return store.finish(complete=True, reason="passed_since")
-            if empty_pages >= 2:
+            if audit["consecutive_source_empty_pages"] >= 2:
                 return store.finish(complete=True, reason="empty_timeline_end")
             if limit and store.count >= limit:
                 return store.finish(complete=False, reason="item_limit")

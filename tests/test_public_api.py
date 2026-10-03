@@ -83,37 +83,25 @@ class PublicAPITests(unittest.TestCase):
         self.assertEqual(client.save_accounts.call_args.kwargs["rounds"], 1)
 
     def test_replies_exclude_context_and_save_clean_dataset(self):
+        from test_discovery import page, tweet
+
         client = self.client()
         self.addCleanup(client.close)
-        client._x.user_timeline_page.return_value = {"data": {}}
         client.get_user = Mock(return_value=Profile("9", "alice", "Alice"))
-        root = Post(
-            "1234567890", "9", "alice", "2026-01-01T00:00:00+00:00", "root", "url"
+        root = tweet("1234567890", author="9")
+        reply = tweet("1234567891", author="9")
+        reply["legacy"].update(
+            conversation_id_str="1234567890", in_reply_to_status_id_str="1234567890"
         )
-        reply = Post(
-            "1234567891",
-            "9",
-            "alice",
-            "2026-01-01T01:00:00+00:00",
-            "reply",
-            "url",
-            conversation_id=root.id,
-            in_reply_to_id=root.id,
-        )
-        with (
-            patch("pyxcom.client.timeline_primary_posts", return_value=[root, reply]),
-            patch("pyxcom.client.bottom_cursor", return_value=None),
-        ):
-            self.assertEqual(
-                [p.id for p in client.get_user_replies("alice")], [reply.id]
-            )
-            self.assertEqual([p.id for p in client.get_user_posts("alice")], [root.id])
-            with tempfile.TemporaryDirectory() as temp:
-                result = client.save_user_replies("alice", temp)
-                self.assertEqual(result.post_count, 1)
-                self.assertTrue((Path(temp) / "comments.csv").exists())
-                self.assertTrue(source_path(temp, "profiles.json").exists())
-                self.assertTrue(validate_collection(temp)["valid"])
+        client._x.user_timeline_page.return_value = page(root, reply, end=True)
+        self.assertEqual([p.id for p in client.get_user_replies("alice")], ["1234567891"])
+        self.assertEqual([p.id for p in client.get_user_posts("alice")], ["1234567890"])
+        with tempfile.TemporaryDirectory() as temp:
+            result = client.save_user_replies("alice", temp)
+            self.assertEqual(result.post_count, 1)
+            self.assertTrue((Path(temp) / "comments.csv").exists())
+            self.assertTrue(source_path(temp, "profiles.json").exists())
+            self.assertTrue(validate_collection(temp)["valid"])
 
     def test_completed_legacy_reply_stream_is_normalized_without_fetching(self):
         client = self.client()

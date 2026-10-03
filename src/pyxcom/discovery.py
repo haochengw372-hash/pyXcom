@@ -180,9 +180,10 @@ def _record_source_page(
     truncated: bool = False,
     ended: bool = False,
     source_ids: set[str] | None = None,
+    namespace: str = "discovery",
 ) -> str | None:
     audit = state.setdefault(
-        "discovery_pagination",
+        namespace + "_pagination",
         {
             "consecutive_source_empty_pages": 0,
             "consecutive_no_progress_pages": 0,
@@ -191,7 +192,7 @@ def _record_source_page(
             "status": "active",
         },
     )
-    seen = set(state.get("discovery_source_ids", []))
+    seen = set(state.get(namespace + "_source_ids", []))
     source_ids = {p.id for p in primary} if source_ids is None else source_ids
     audit["last_page_primary_count"] = len(primary)
     audit["last_page_new_source_ids"] = len(source_ids - seen)
@@ -207,7 +208,7 @@ def _record_source_page(
     )
     if not truncated:
         seen.update(source_ids)
-        state["discovery_source_ids"] = sorted(seen)
+        state[namespace + "_source_ids"] = sorted(seen)
     audit["source_ids_seen"] = len(seen)
     reason = None
     if not ended and not truncated:

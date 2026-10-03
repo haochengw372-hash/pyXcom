@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.1 — 2026-10-04
+
+### Fixed
+
+- Account timelines pause as partial `no_progress_limit` after five consecutive pages without new primary source IDs, with counters retained across save calls and a separate `timeline_pagination` report.
+- Explicitly pinned items remain collectable but do not mask the timeline date boundary; old-page counters persist across page budgets and repeated old pages do not establish a second date-boundary page.
+- Pre-counter checkpoints can seed progress from a complete hash-verified saved response history without changing raw files, query, observer evidence or the current cursor; a proven saved cycle pauses without another timeline request.
+- Source progress is measured before date, role and author filters, so fresh context or out-of-window records continue pagination.
+
+Public collection method signatures remain unchanged; memory timeline traversal raises `APIError` when the no-progress limit is reached. A paused save remains partial on subsequent calls. See [timeline pagination](docs/timeline-pagination.md) for evidence and limitations.
+
 ## 1.0.0 — 2026-10-03
 
 ### Added

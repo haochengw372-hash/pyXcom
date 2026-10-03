@@ -4,9 +4,11 @@
 
 Collect public X user profiles, posts, replies, search results and observed network relationships using your existing Chrome, Edge or Safari session. Post datasets contain three linked CSV tables: `users.csv`, `posts.csv` and `comments.csv`; network datasets have separate relationship and snapshot tables.
 
-Version 1.0.0 keeps the get/save API and adds explicit saved-data integrity assessment and guarded recovery generations. Readable posts survive mixed source pages, profile history follows stable user IDs, and JSONL preserves Unicode text. See the [release notes](CHANGELOG.md), [saved-data rules](docs/stability.md), and [recovery workflow](docs/recovery.md).
+Version 1.0.1 keeps the get/save API and adds explicit saved-data integrity assessment and guarded recovery generations. Readable posts survive mixed source pages, profile history follows stable user IDs, and JSONL preserves Unicode text. See the [release notes](CHANGELOG.md), [saved-data rules](docs/stability.md), and [recovery workflow](docs/recovery.md).
 
 The author reports field use with approximately 130,000 collected records. This experience informed the persistence and recovery checks; it is not a benchmark, a verified unique-post total, or proof of complete historical coverage. Collection remains limited to results returned by X.
+
+Version 1.0.1 also handles account timelines that return nonempty duplicate pages with changing cursors. A saved no-progress streak pauses as partial coverage across calls, and explicitly pinned posts no longer mask the date boundary. See [timeline pagination](docs/timeline-pagination.md).
 
 The interface follows [PykTok](https://github.com/dfreelon/pyktok)'s approachable get/save convention, with explicit parameters and resumable datasets. pyXcom is an independent implementation; it does not depend on PykTok or twikit.
 
@@ -336,7 +338,7 @@ If you use pyXcom in a paper, thesis, dataset, or other research output, please 
 
 **Suggested reference**
 
-Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 1.0.0) [Computer software]. https://github.com/haochengw372-hash/pyXcom
+Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 1.0.1) [Computer software]. https://github.com/haochengw372-hash/pyXcom
 
 **BibTeX**
 
@@ -345,7 +347,7 @@ Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communi
   author  = {Wang, Haocheng},
   title   = {{pyXcom}: Structured and Auditable X Data Collection for Communication Research},
   year    = {2026},
-  version = {1.0.0},
+  version = {1.0.1},
   url     = {https://github.com/haochengw372-hash/pyXcom}
 }
 ```

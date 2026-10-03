@@ -432,6 +432,7 @@ def _export_tables_unchecked(output_dir: str | Path) -> dict:
             "missing_ids",
             "date_scope",
             "discovery_pagination",
+            "timeline_pagination",
             "source_content",
         ):
             if key in collection:

@@ -223,6 +223,7 @@ def _timeline_item_contents(data: dict) -> Iterator[dict]:
                         "_timeline_entry_id": module_item.get(
                             "entryId", entry.get("entryId")
                         ),
+                        "_timeline_pinned": instruction.get("type") == "TimelinePinEntry",
                     }
             else:
                 item = content.get("itemContent") or content
@@ -232,7 +233,11 @@ def _timeline_item_contents(data: dict) -> Iterator[dict]:
                     and not item.get("entryType")
                 ):
                     item = {**item, "entryType": "TimelineTimelineCursor"}
-                yield {**item, "_timeline_entry_id": entry.get("entryId")}
+                yield {
+                    **item,
+                    "_timeline_entry_id": entry.get("entryId"),
+                    "_timeline_pinned": instruction.get("type") == "TimelinePinEntry",
+                }
         for module_item in instruction.get("moduleItems", []):
             item = module_item.get("item") or module_item
             yield {
@@ -242,11 +247,16 @@ def _timeline_item_contents(data: dict) -> Iterator[dict]:
 
 
 def timeline_primary_posts(
-    data: dict, *, captured_at_utc: str | None = None
+    data: dict, *, captured_at_utc: str | None = None, include_pinned: bool = True
 ) -> list[Post]:
     """Read primary entries, replacements and modules without counting quotes."""
     posts: dict[str, Post] = {}
     for content in _timeline_item_contents(data):
+        if not include_pinned and (
+            content.get("_timeline_pinned")
+            or (content.get("socialContext") or {}).get("contextType") == "Pin"
+        ):
+            continue
         result = (content.get("tweet_results") or {}).get("result")
         if isinstance(result, dict):
             post = parse_post(result, captured_at_utc=captured_at_utc)
