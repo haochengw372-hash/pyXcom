@@ -7,8 +7,8 @@ name = "pyXcom"
 version = "1.0.1"
 description = "Collect public X posts, search results, conversations, reposts, and observed follow networks with your browser session"
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Haocheng Wang"}]
 requires-python = ">=3.10"
 dependencies = [
@@ -33,4 +33,4 @@ pyxcom = "pyxcom.cli:main"
 packages = ["src/pyxcom"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src/pyxcom", "/tests", "/README.md", "/CHANGELOG.md", "/pyproject.toml", "/examples", "/docs", "/LICENSE", "/CITATION.cff"]
+include = ["/src/pyxcom", "/tests", "/README.md", "/CHANGELOG.md", "/pyproject.toml", "/examples", "/docs", "/LICENSE", "/NOTICE", "/CITATION.cff"]

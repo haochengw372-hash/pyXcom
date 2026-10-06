@@ -1,3 +1,5 @@
+> **使用请引用：Haocheng Wang。** 如果你在论文、数据集或其他研究成果中使用 pyXcom，请引用 [CITATION.cff](CITATION.cff) 中的软件信息，并注明使用版本；[引用格式](#citation)见下文。引用是学术署名请求，不是 Apache-2.0 协议的附加使用条件。
+
 # pyXcom
 
 **使用前请自行打开 Chrome、Edge 或 Safari 并登录 X。pyXcom 不会打开或控制浏览器，也不会替你登录。**
@@ -328,7 +330,7 @@ X endpoints may change or impose limits. pyXcom discovers current GraphQL query 
 
 ## License
 
-pyXcom is released under the [MIT License](https://github.com/haochengw372-hash/pyXcom/blob/main/LICENSE). Copyright © 2026 Haocheng Wang.
+pyXcom is released under the [Apache License 2.0](https://github.com/haochengw372-hash/pyXcom/blob/main/LICENSE). Copyright © 2026 Haocheng Wang. Previously published MIT versions retain their original license; see [NOTICE](NOTICE).
 
 ## Citation
 
@@ -352,7 +354,7 @@ Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communi
 }
 ```
 
-For reproducible reporting, also describe the collection dates, account or keyword scope, comment-depth limits, package version, and coverage/stop reasons recorded in the output manifest. No DOI or published-paper citation is currently assigned; this reference cites the software itself. Citation is appreciated and does not add a condition to the MIT license.
+For reproducible reporting, also describe the collection dates, account or keyword scope, comment-depth limits, package version, and coverage/stop reasons recorded in the output manifest. No DOI or published-paper citation is currently assigned; this reference cites the software itself. Citation is appreciated and does not add a condition to the Apache-2.0 license.
 
 For longitudinal profiles in post datasets use `profile_snapshots.csv`; network datasets use `user_snapshots.csv`. `users.csv` is the consolidated view. Canonical post tables keep the first saved observation for each ID; later returned text and metrics remain in observation archives and metric snapshots.
 

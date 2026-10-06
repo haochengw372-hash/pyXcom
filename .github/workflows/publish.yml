@@ -41,7 +41,7 @@ jobs:
 
           allowed_roots = {
               "src", "tests", "docs", "examples", "README.md", "pyproject.toml",
-              "LICENSE", "CITATION.cff", "CHANGELOG.md", ".gitignore", "PKG-INFO",
+              "LICENSE", "NOTICE", "CITATION.cff", "CHANGELOG.md", ".gitignore", "PKG-INFO",
           }
           forbidden_parts = {
               "data", "reset-x-study", ".pyxcom", "__pycache__", ".pytest_cache",

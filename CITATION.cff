@@ -8,7 +8,7 @@ authors:
     affiliation: Communication University of China
 version: 1.0.1
 date-released: 2026-10-04
-license: MIT
+license: Apache-2.0
 repository-code: "https://github.com/haochengw372-hash/pyXcom"
 url: "https://github.com/haochengw372-hash/pyXcom"
 abstract: "A Python package for collecting public X posts, native search results, reply branches, quotations, repost activity and observed follower/following networks, with linked tables, raw-response provenance and resumable snapshots."
