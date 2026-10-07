@@ -1,5 +1,4 @@
-> **使用请引用：Haocheng Wang。** 如果你在论文、数据集或其他研究成果中使用 pyXcom，请引用 [CITATION.cff](CITATION.cff) 中的软件信息，并注明使用版本；[引用格式](#citation)见下文。引用是学术署名请求，不是 Apache-2.0 协议的附加使用条件。
-
+> **使用请引用：Haocheng Wang。** 如果你在论文、数据集或其他研究成果中使用 pyXcom，请引用 [CITATION.cff](CITATION.cff) 中的软件信息，并注明使用版本；[引用格式](#citation)见下文。
 # pyXcom
 
 **使用前请自行打开 Chrome、Edge 或 Safari 并登录 X。pyXcom 不会打开或控制浏览器，也不会替你登录。**
