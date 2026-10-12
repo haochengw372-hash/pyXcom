@@ -12,6 +12,7 @@ from pathlib import Path
 from ._persistence import append_jsonl, atomic_json as _atomic_json, read_jsonl
 from .layout import internal_dir, migrate_collection
 from .models import CollectionResult, Post
+from .provenance import assert_collection_owner, observer_metadata
 from .transport import now_utc
 from .tables import _export_tables_unchecked
 
@@ -19,6 +20,7 @@ from .tables import _export_tables_unchecked
 class PostStore:
     def __init__(self, output_dir: str | Path, *, query: dict) -> None:
         self.output_dir = Path(output_dir).expanduser()
+        assert_collection_owner(self.output_dir)
         if (self.output_dir / "network_manifest.json").exists():
             raise ValueError(
                 "Network snapshots require a separate output directory from post collections"
@@ -96,7 +98,7 @@ class PostStore:
     def log(self, **record) -> None:
         append_jsonl(
             self._internal / "collection_log.jsonl",
-            [{"timestamp": now_utc(), **record}],
+            [{"timestamp": now_utc(), **record, **observer_metadata()}],
         )
 
     def _snapshot(self, post: Post) -> None:

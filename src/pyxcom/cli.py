@@ -106,6 +106,18 @@ def build_parser() -> argparse.ArgumentParser:
         "verify-generation", help="Verify a prepared generation offline"
     )
     generation.add_argument("--generation-dir", type=Path, required=True)
+    pool = commands.add_parser(
+        "pool", help="Resume a queue with separately identified browser logins"
+    )
+    pool.add_argument("--config", type=Path, required=True)
+    pool.add_argument("--state-dir", type=Path, required=True)
+    pool.add_argument("--page-budget", type=_depth, default=1)
+    pool.add_argument("--max-steps", type=_budget)
+    pool.add_argument("--max-workers", type=_depth, default=4)
+    pool.add_argument("--max-seconds", type=float)
+    pool.add_argument("--wait-on-rate-limit", action="store_true")
+    pool.add_argument("--resume-job", help="Explicitly resume one paused job ID")
+    pool.add_argument("--retry-stalled", action="store_true")
     common = _common_parser()
     profile = commands.add_parser(
         "user", aliases=["profile"], parents=[common], help="Get public user profile"
@@ -339,10 +351,125 @@ def _recovery_json(path: Path | None, label: str) -> dict | None:
     return value
 
 
+def _load_pool_config(path: Path) -> dict:
+    """Reject unknown configuration fields before creating clients or state."""
+
+    def object_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate configuration field")
+            result[key] = value
+        return result
+
+    config = json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=object_pairs
+    )
+    allowed = {"logins", "jobs", "client_options", "rate_limit_scope"}
+    if not isinstance(config, dict) or set(config) - allowed:
+        raise ValueError("invalid pool configuration fields")
+    logins, jobs = config.get("logins"), config.get("jobs", [])
+    if not isinstance(logins, list) or not logins or not isinstance(jobs, list):
+        raise ValueError("pool requires a login list and a job list")
+    login_fields = {
+        "login_id",
+        "browser",
+        "profile",
+        "cookie_db",
+        "expected_observer_id",
+    }
+    for login in logins:
+        if (
+            not isinstance(login, dict)
+            or set(login) - login_fields
+            or "login_id" not in login
+        ):
+            raise ValueError("invalid login configuration fields")
+    job_fields = {
+        "job_id",
+        "kind",
+        "target",
+        "output_dir",
+        "options",
+        "priority",
+        "login_id",
+        "existing_observer_id",
+    }
+    required_job_fields = {"job_id", "kind", "target", "output_dir"}
+    date_options = {"since", "until", "limit"}
+    option_fields = {
+        "search_query": date_options,
+        "post_quotes": date_options,
+        "user_posts": date_options,
+        "user_replies": date_options,
+        "user_reposts": date_options,
+        "post_comments": {"since", "until", "max_depth", "max_comments"},
+        "followers": {"limit", "snapshot_id"},
+        "following": {"limit", "snapshot_id"},
+        "post_reposters": {"limit", "snapshot_id"},
+    }
+    for job in jobs:
+        if (
+            not isinstance(job, dict)
+            or set(job) - job_fields
+            or not required_job_fields.issubset(job)
+            or not isinstance(job.get("options", {}), dict)
+        ):
+            raise ValueError("invalid job configuration fields")
+        kind = job["kind"]
+        if (
+            not isinstance(kind, str)
+            or kind not in option_fields
+            or set(job.get("options", {})) - option_fields[kind]
+        ):
+            raise ValueError("invalid job kind or options")
+    client_options = config.get("client_options", {})
+    if not isinstance(client_options, dict) or set(client_options) - {
+        "proxy",
+        "delay",
+        "timeout",
+    }:
+        raise ValueError("invalid client configuration fields")
+    if config.get("rate_limit_scope", "auto") not in {"auto", "shared", "per_account"}:
+        raise ValueError("invalid rate-limit scope")
+    return config
+
+
+def _run_pool(args: argparse.Namespace) -> int:
+    # Keep single-client commands independent of the pool module.
+    from .pool import CollectionJob, LoginConfig, XClientPool
+
+    if args.retry_stalled and args.resume_job is None:
+        raise ValueError("--retry-stalled requires --resume-job")
+    config = _load_pool_config(args.config)
+    logins = [LoginConfig(**item) for item in config["logins"]]
+    jobs = [CollectionJob(**item) for item in config.get("jobs", [])]
+    with XClientPool(
+        logins,
+        state_dir=args.state_dir,
+        client_options=config.get("client_options"),
+        rate_limit_scope=config.get("rate_limit_scope", "auto"),
+    ) as pool:
+        pool.add_jobs(jobs)
+        if args.resume_job is not None:
+            pool.resume_job(args.resume_job, retry_stalled=args.retry_stalled)
+        summary = pool.run(
+            page_budget=args.page_budget,
+            max_steps=args.max_steps,
+            max_workers=args.max_workers,
+            max_seconds=args.max_seconds,
+            wait_on_rate_limit=args.wait_on_rate_limit,
+        )
+    print(json.dumps(summary, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "pool":
+            return _run_pool(args)
         if args.command in (
             "assess",
             "prepare-recovery",
@@ -537,7 +664,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))
     except (PyXcomError, ValueError, OSError) as exc:
-        print(f"pyxcom: {exc}", file=sys.stderr)
+        if args.command == "pool":
+            print("pyxcom: pool configuration or operation failed; inspect the safe pool status", file=sys.stderr)
+        else:
+            print(f"pyxcom: {exc}", file=sys.stderr)
         return 2
     return 0
 

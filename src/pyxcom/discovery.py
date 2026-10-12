@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Iterator
 from urllib.parse import quote
 
 from .errors import APIError, ParseError, RateLimitError
+from .provenance import guarded_collection
 from .models import CollectionResult, Post, Profile
 from .parse import (
     _timeline_item_contents,
@@ -639,6 +640,7 @@ class DiscoveryMixin:
             )
         )
 
+    @guarded_collection
     def save_search_query(
         self,
         query: str,
@@ -720,6 +722,7 @@ class DiscoveryMixin:
             )
         )
 
+    @guarded_collection
     def save_post_quotes(
         self,
         post_id_or_url: str,
@@ -791,6 +794,7 @@ class DiscoveryMixin:
             )
         )
 
+    @guarded_collection
     def save_user_reposts(
         self,
         handle: str,

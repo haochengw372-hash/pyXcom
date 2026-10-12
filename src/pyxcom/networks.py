@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Iterator
 from uuid import uuid4
 
 from .errors import APIError, ParseError, RateLimitError
+from .provenance import guarded_collection
 from .models import CollectionResult, Post, Profile, Relationship
 from .parse import _walk, parse_profile
 from .storage import _atomic_json
@@ -291,6 +292,8 @@ def _merge_csv(
 class NetworkStore:
     def __init__(self, directory, *, kind, object_id, snapshot_id=None):
         self.output = Path(directory).expanduser()
+        from .provenance import assert_collection_owner
+        assert_collection_owner(self.output)
         # Network snapshots are a separate dataset from post/comment exports.
         # Reject before creating directories or modifying any public tables.
         if any(
@@ -380,7 +383,9 @@ class NetworkStore:
                 raise ValueError("Raw page storage must remain inside output_dir")
             folder.mkdir(exist_ok=True)
             self.state["raw_pages"] += 1
-            _atomic_json(folder / f"{self.state['raw_pages']:06d}.json", payload)
+            from .provenance import observer_metadata
+            _atomic_json(folder / f"{self.state['raw_pages']:06d}.json",
+                         {**payload, **observer_metadata()})
         self.state["updated_at_utc"] = now_utc()
         _atomic_json(self.path, self.state)
 
@@ -500,7 +505,9 @@ class NetworkStore:
             if (self.output / name).exists()
         }
         _atomic_json(manifest_path, manifest)
-        append_jsonl(self.output / ".pyxcom" / "collection_log.jsonl", [summary])
+        from .provenance import observer_metadata
+        append_jsonl(self.output / ".pyxcom" / "collection_log.jsonl",
+                     [{**summary, **observer_metadata()}])
         return CollectionResult(
             self.output,
             listed_user_count,
@@ -846,6 +853,7 @@ class NetworkMixin:
         self.last_network_collection = dict(store.state)
         return store.finish(target_author_id=target_author)
 
+    @guarded_collection
     def save_followers(
         self,
         user_id: str,
@@ -864,6 +872,7 @@ class NetworkMixin:
             snapshot_id=snapshot_id,
         )
 
+    @guarded_collection
     def save_following(
         self,
         user_id: str,
@@ -882,6 +891,7 @@ class NetworkMixin:
             snapshot_id=snapshot_id,
         )
 
+    @guarded_collection
     def save_post_reposters(
         self,
         post_id_or_url: str,

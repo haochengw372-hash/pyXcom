@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 — 2026-10-12
+
+- Add bounded `XClientPool`, public login/job configurations, persistent observer
+  ownership, endpoint cooldowns, and queue CLI.
+- Verify browser identities with the current Viewer operation.
+- Pace and report actual HTTP attempts across page slices; isolate failed logins.
+- Exclude overlapping writers across pools, public savers, export, and recovery.
+- Preserve observer provenance for new source logs without relabeling old data.
+- Add matched SDK comparisons and serial/concurrent scheduler benchmarks.
+- Preserve existing synchronous collection methods and runtime dependencies.
+
 ## 1.0.1 — 2026-10-04
 
 ### Fixed

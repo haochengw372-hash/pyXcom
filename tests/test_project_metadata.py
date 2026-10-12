@@ -19,10 +19,10 @@ class ProjectMetadataTests(unittest.TestCase):
 
     def test_readme_opens_with_voluntary_author_citation(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        opening = readme.splitlines()[0]
-        self.assertIn("使用请引用：Haocheng Wang", opening)
+        opening = readme.split("## Installation", 1)[0]
+        self.assertIn("please cite **Haocheng Wang**", opening)
         self.assertIn("[CITATION.cff](CITATION.cff)", opening)
-        self.assertIn("不是 Apache-2.0 协议的附加使用条件", opening)
+        self.assertIn("Citation is appreciated and does not add a license condition", readme)
         citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
         self.assertIn("family-names: Wang", citation)
         self.assertIn("given-names: Haocheng", citation)

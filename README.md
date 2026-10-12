@@ -191,6 +191,32 @@ with XClient(profile="Default") as client:
 
 Repeat to continue saved account tasks. The [API reference](docs/api.md) describes rounds, progress callbacks and rate-limit waiting.
 
+### Collect concurrently with multiple logins
+
+Use separate manually authenticated browser profiles for parallel account or
+query collection. The pool verifies each observing account, runs one slice per
+account at a time, and persists job ownership and endpoint cooldowns.
+
+```python
+from pyxcom import CollectionJob, LoginConfig, XClientPool
+
+with XClientPool([
+    LoginConfig("a", profile="Default"),
+    LoginConfig("b", profile="Profile 3"),
+], state_dir="queue") as pool:
+    pool.add_jobs([
+        CollectionJob("openai", "user_posts", "OpenAI", "output/openai"),
+        CollectionJob("anthropic", "user_posts", "AnthropicAI", "output/anthropic"),
+    ])
+    report = pool.run(max_workers=2, page_budget=1, max_steps=10)
+```
+
+Jobs keep their original observer when resumed. Duplicate logins for the same X
+account do not add workers. See [concurrent collection](docs/pool.md) for limits,
+resume behavior, output ownership, and CLI configuration. Performance depends on
+available sessions and platform responses; see [comparison methods](benchmarks/README.md)
+and [the bounded live results](benchmarks/LIVE_RESULTS.md).
+
 ### Collect quotes, reposts and network snapshots
 
 Quotes and repost activity have their own methods and output directories:

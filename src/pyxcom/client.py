@@ -15,8 +15,9 @@ from .discovery import DiscoveryMixin, _record_source_page, _source_page
 from .networks import NetworkMixin
 from .auth import load_x_cookies
 from .profiles import save_profiles as _save_profiles
-from .errors import APIError, IntegrityError, RateLimitError
+from .errors import APIError, AuthenticationError, IntegrityError, RateLimitError
 from .layout import child_dir, migrate_collection, source_path
+from .provenance import guarded_collection
 from .models import CollectionResult, Post, Profile
 from .parse import bottom_cursor, timeline_primary_posts
 from .search import MirrorSearch
@@ -164,6 +165,38 @@ class XClient(DiscoveryMixin, NetworkMixin):
         )
         self._profile_cache: dict[str, Profile] = {}
         self.delay = max(0.0, delay)
+        self._observer_id: str | None = None
+
+    @classmethod
+    def from_login(
+        cls, *, browser: str = "chrome", profile: str | None = None,
+        cookie_db: str | Path | None = None, proxy: str | None = None,
+        delay: float = 1.0, timeout: float = 30,
+    ) -> "XClient":
+        """Open a manual browser session and verify its public account identity."""
+        client = cls(browser=browser, profile=profile, cookie_db=cookie_db,
+                     proxy=proxy, delay=delay, timeout=timeout)
+        try:
+            client.check_login_identity()
+        except BaseException:
+            client.close()
+            raise
+        return client
+
+    @property
+    def observer_id(self) -> str | None:
+        """Public user ID verified from the authenticated session, if checked."""
+        return self._observer_id
+
+    def check_login_identity(self) -> str:
+        """Recheck the session; a changed account cannot inherit its old binding."""
+        observer = self._x.get_login_identity()
+        if not isinstance(observer, str) or not observer.isascii() or not observer.isdigit():
+            raise AuthenticationError("Authenticated account identity unavailable")
+        if self._observer_id is not None and observer != self._observer_id:
+            raise AuthenticationError("Authenticated account identity changed")
+        self._observer_id = observer
+        return observer
 
     def close(self) -> None:
         self._x.close()
@@ -298,6 +331,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             )
         )
 
+    @guarded_collection
     def save_user_posts(
         self,
         handle: str,
@@ -401,6 +435,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             cursor = next_cursor
             time.sleep(self.delay)
 
+    @guarded_collection
     def save_user_activity(
         self,
         handle: str,
@@ -552,6 +587,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             )
         )
 
+    @guarded_collection
     def save_search(
         self,
         keyword: str,
@@ -686,6 +722,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             reason="item_limit" if capped else activity.reason,
         )
 
+    @guarded_collection
     def save_accounts(
         self,
         handles: list[str],
@@ -752,6 +789,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             )
         )
 
+    @guarded_collection
     def save_user_replies(
         self,
         handle: str,
@@ -815,6 +853,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             )
         )
 
+    @guarded_collection
     def save_search_posts(
         self,
         keyword: str,
@@ -837,6 +876,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             limit=limit,
         )
 
+    @guarded_collection
     def save_users_activity(
         self,
         handles: list[str],
@@ -917,6 +957,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             )
         )
 
+    @guarded_collection
     def save_post_comments(
         self,
         post_id_or_url: str,

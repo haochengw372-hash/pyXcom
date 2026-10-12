@@ -182,6 +182,13 @@ def _depths(records: dict[str, Post]) -> dict[str, tuple[int | None, str]]:
 
 
 def export_tables(output_dir: str | Path) -> dict:
+    """Rebuild verified public tables under an exclusive collection scope lock."""
+    from .provenance import collection_write_guard
+    with collection_write_guard(output_dir):
+        return _export_tables_verified(output_dir)
+
+
+def _export_tables_verified(output_dir: str | Path) -> dict:
     """Rebuild public tables only when saved sources pass integrity assessment."""
     directory = Path(output_dir).expanduser()
     # Existing modern public manifests are integrity anchors. Fresh/legacy

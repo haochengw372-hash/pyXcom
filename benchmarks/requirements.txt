@@ -1,0 +1,4 @@
+# Comparator environment only; never package runtime requirements.
+pyXcom==1.0.1
+twikit==2.3.3
+twscrape==0.20.1

@@ -5,9 +5,10 @@ import re
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
+from typing import Any, Callable
 import httpx
 
-from .errors import APIError, RateLimitError
+from .errors import APIError, AuthenticationError, RateLimitError
 from .models import Post, Profile
 from .parse import parse_post, parse_profile, single_post
 from .assets import lazy_operation_assets
@@ -47,28 +48,107 @@ class XTransport:
         self._homepage_html = ""
         self._main_asset_url = ""
         self._lazy_attempted: set[str] = set()
+        self._request_gate: Callable[[str], None] | None = None
+        self._request_observer: Callable[[dict], None] | None = None
+        self.last_error: dict | None = None
 
     def close(self) -> None:
         self._x.close()
         self._assets.close()
 
+    def _failure(self, error: APIError) -> APIError:
+        self.last_error = {
+            "operation": error.operation, "status_code": error.status_code,
+            "error_codes": list(error.error_codes), "reset_at": error.reset_at,
+            "remaining": error.remaining, "error_type": type(error).__name__,
+        }
+        return error
+
+    @staticmethod
+    def _rate_value(response: httpx.Response, name: str) -> int | None:
+        value = response.headers.get(name, "")
+        return int(value) if value.isascii() and value.isdigit() else None
+
+    @staticmethod
+    def _operation_name(url: str) -> str:
+        """Use fixed labels or operation names, never request parameters."""
+        path = urlsplit(url).path
+        if path.startswith("/i/api/graphql/"):
+            name = path.rsplit("/", 1)[-1]
+            return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", name) else "GraphQL"
+        if path == "/1.1/account/settings.json":
+            return "AccountSettings"
+        return "Homepage" if path in {"", "/"} else "WebAsset"
+
     def _request(
         self, client: httpx.Client, method: str, url: str, **kwargs
     ) -> httpx.Response:
-        """Retry transient transport/5xx errors, then surface a safe message."""
-        for attempt in range(3):
+        """Gate and measure every attempt, including retries and discovery calls."""
+        operation = self._operation_name(url)
+        for attempt in range(1, 4):
+            if self._request_gate is not None:
+                self._request_gate(operation)
+            started = time.monotonic()
+            response = None
+            error_type = None
             try:
                 response = client.request(method, url, **kwargs)
+                if response.status_code >= 400:
+                    error_type = "HTTPError"
             except httpx.RequestError as exc:
-                if attempt == 2:
-                    raise APIError(
-                        f"Network request to {urlsplit(url).netloc} failed after 3 attempts"
-                    ) from exc
-            else:
-                if response.status_code not in {502, 503, 504} or attempt == 2:
-                    return response
-            time.sleep(2**attempt)
-        raise APIError("Network retry loop ended unexpectedly")
+                error_type = type(exc).__name__
+                if attempt == 3:
+                    raise self._failure(APIError(
+                        "Network request failed after 3 attempts", operation=operation
+                    )) from exc
+            finally:
+                if self._request_observer is not None:
+                    self._request_observer({
+                        "operation": operation,
+                        "status_code": response.status_code if response is not None else None,
+                        "attempt": attempt,
+                        "elapsed_seconds": time.monotonic() - started,
+                        "response_bytes": len(response.content) if response is not None else 0,
+                        "reset_at": self._rate_value(response, "x-rate-limit-reset") if response is not None else None,
+                        "remaining": self._rate_value(response, "x-rate-limit-remaining") if response is not None else None,
+                        "error_type": error_type,
+                    })
+            if response is not None and (
+                response.status_code not in {502, 503, 504} or attempt == 3
+            ):
+                return response
+            time.sleep(2 ** (attempt - 1))
+        raise self._failure(APIError("Network retry loop ended unexpectedly", operation=operation))
+
+    def _payload(self, response: httpx.Response, operation: str) -> dict:
+        reset = self._rate_value(response, "x-rate-limit-reset")
+        remaining = self._rate_value(response, "x-rate-limit-remaining")
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        errors = payload.get("errors") if isinstance(payload, dict) else None
+        codes = tuple(
+            item["code"] for item in errors
+            if isinstance(item, dict) and type(item.get("code")) is int
+        ) if isinstance(errors, list) else ()
+        error_class: type[APIError] = APIError
+        message = None
+        if response.status_code == 429 or (
+            response.status_code == 404 and not response.content and remaining == 0
+        ) or 88 in codes:
+            error_class = RateLimitError
+            message = f"X rate-limited {operation}"
+        elif response.status_code != 200:
+            message = f"X returned HTTP {response.status_code} for {operation}"
+        elif not isinstance(payload, dict) or errors:
+            message = f"X returned an unusable response for {operation}"
+        if message is not None:
+            raise self._failure(error_class(
+                message, status_code=response.status_code, operation=operation,
+                error_codes=codes, reset_at=reset, remaining=remaining,
+            ))
+        return payload
 
     def _get(self, client: httpx.Client, url: str, **kwargs) -> httpx.Response:
         return self._request(client, "GET", url, **kwargs)
@@ -81,7 +161,7 @@ class XTransport:
             return
         response = self._get(self._x, "https://x.com/")
         if response.status_code != 200:
-            raise APIError(f"X homepage returned HTTP {response.status_code}")
+            self._payload(response, "Homepage")
         match = _MAIN_SCRIPT.search(response.text)
         if not match:
             raise APIError(
@@ -89,7 +169,7 @@ class XTransport:
             )
         js_response = self._get(self._assets, match.group(0))
         if js_response.status_code != 200:
-            raise APIError(f"X web bundle returned HTTP {js_response.status_code}")
+            self._payload(js_response, "WebAsset")
         operations = {
             name: query_id for query_id, name in _OPERATION.findall(js_response.text)
         }
@@ -141,11 +221,12 @@ class XTransport:
         features: dict | None = None,
         field_toggles: dict | None = None,
     ) -> dict:
+        self.last_error = None
         self.discover()
         if operation not in self._operations:
             self._discover_lazy_operation(operation)
         if operation not in self._operations:
-            raise APIError(f"X web bundle has no {operation} operation")
+            raise self._failure(APIError(f"X web bundle has no {operation} operation", operation=operation))
         params = {
             "variables": json.dumps(variables, separators=(",", ":")),
             "features": json.dumps(features or {}, separators=(",", ":")),
@@ -167,33 +248,56 @@ class XTransport:
             response = self._post_read(self._x, url, json=body, headers=self._headers())
         else:
             response = self._get(self._x, url, params=params, headers=self._headers())
-        if response.status_code == 429:
-            reset = response.headers.get("x-rate-limit-reset")
-            raise RateLimitError(
-                f"X rate-limited {operation}",
-                int(reset) if reset and reset.isdigit() else None,
-            )
-        if response.status_code == 404 and not response.content:
-            # A 404 is not evidence of an exhausted quota when requests remain.
-            reset = response.headers.get("x-rate-limit-reset")
-            remaining = response.headers.get("x-rate-limit-remaining")
-            if remaining == "0":
-                raise RateLimitError(
-                    f"X quota exhausted for {operation}",
-                    int(reset) if reset and reset.isdigit() else None,
+        return self._payload(response, operation)
+
+    def get_login_identity(self) -> str:
+        """Resolve the authenticated current user; never use a collection target."""
+        self.last_error = None
+        self.discover()
+        if "Viewer" in self._operations:
+            try:
+                payload = self.graphql(
+                    "Viewer", {"withCommunitiesMemberships": True},
+                    features={
+                        "responsive_web_graphql_exclude_directive_enabled": True,
+                        "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+                        "responsive_web_graphql_timeline_navigation_enabled": True,
+                        "verified_phone_label_enabled": False,
+                        "rweb_tipjar_consumption_enabled": True,
+                        "creator_subscriptions_tweet_preview_api_enabled": True,
+                    },
+                    field_toggles={"isDelegate": False, "withAuxiliaryUserLabels": False},
                 )
-            raise APIError(
-                f"X returned an empty 404 for {operation}; the route or read request may be incompatible"
-            )
-        if response.status_code != 200:
-            raise APIError(f"X returned HTTP {response.status_code} for {operation}")
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise APIError(f"X returned non-JSON data for {operation}") from exc
-        if not isinstance(payload, dict) or payload.get("errors"):
-            raise APIError(f"X returned an error for {operation}")
-        return payload
+            except APIError as exc:
+                # A missing read route may use the legacy current-user endpoint.
+                # Authentication failures and quota exhaustion must stop here.
+                if exc.status_code != 404 or exc.error_codes or isinstance(exc, RateLimitError):
+                    raise
+            else:
+                result: Any = payload
+                for key in ("data", "viewer", "user_results", "result"):
+                    result = result.get(key) if isinstance(result, dict) else None
+                observer = result.get("rest_id") if isinstance(result, dict) else None
+                if (
+                    not isinstance(result, dict) or result.get("__typename") != "User"
+                    or not isinstance(observer, str) or not observer.isascii()
+                    or not observer.isdigit()
+                ):
+                    raise AuthenticationError("Authenticated Viewer identity unavailable")
+                return observer
+        self.last_error = None
+        response = self._get(
+            self._x, "https://api.x.com/1.1/account/settings.json",
+            headers=self._headers(),
+        )
+        settings = self._payload(response, "AccountSettings")
+        handle = settings.get("screen_name")
+        if not isinstance(handle, str) or not re.fullmatch(r"[A-Za-z0-9_]{1,15}", handle):
+            raise AuthenticationError("Authenticated account identity unavailable")
+        profile = self.get_profile(handle)
+        if not profile.id.isascii() or not profile.id.isdigit() or profile.handle.lower() != handle.lower():
+            raise AuthenticationError("Authenticated account identity could not be verified")
+        return profile.id
 
     def get_profile(self, handle: str) -> Profile:
         payload = self.graphql(

@@ -300,6 +300,16 @@ def _atomic_bytes(path: Path, value: bytes) -> None:
 def apply_recovery(
     output_dir: str | Path, *, generation_dir: str | Path, receipt_dir: str | Path
 ) -> dict:
+    """Apply a verified generation while excluding concurrent pool writers."""
+    from .provenance import collection_write_guard
+    with collection_write_guard(output_dir):
+        return _apply_recovery(output_dir, generation_dir=generation_dir,
+                               receipt_dir=receipt_dir)
+
+
+def _apply_recovery(
+    output_dir: str | Path, *, generation_dir: str | Path, receipt_dir: str | Path
+) -> dict:
     """Explicitly replace derived public files after a fresh exact-input check.
 
     No private source file is rewritten. An interrupted multi-file replacement

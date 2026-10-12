@@ -1,4 +1,4 @@
-# Public API — pyXcom 1.0.1
+# Public API — pyXcom 1.1.0
 
 The native discovery and network methods have passed offline tests and bounded authenticated live endpoint tests. These tests verify the exercised acquisition paths, not complete historical or network coverage.
 
@@ -207,3 +207,16 @@ CLI equivalents are `assess`, `prepare-recovery`, `verify-generation`, and expli
 | `*_user_posts(..., timeline="replies")` | `*_user_replies(...)` |
 
 No removal is scheduled. These names call the same implementation; no separate authentication flow or duplicate scraper is introduced.
+
+## Concurrent queue
+
+`LoginConfig`, `CollectionJob`, and `XClientPool` are public imports.
+`XClient.from_login(...)` verifies the authenticated public observer ID and
+exposes it as `client.observer_id`; `client.check_login_identity()` verifies it
+again. Existing `XClient(...)` behavior remains available for single-client use.
+
+`XClientPool(logins, *, state_dir, client_options=None, rate_limit_scope="auto")`
+supports `add_job`, `add_jobs`, `resume_job`, `run`, and context-managed close.
+`run(*, page_budget=1, max_steps=None, max_workers=4,
+wait_on_rate_limit=False, max_seconds=None)` returns a status dictionary, not
+records or a DataFrame. See [pool](pool.md) for the complete contract.

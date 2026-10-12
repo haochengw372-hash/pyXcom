@@ -40,15 +40,13 @@ jobs:
           import zipfile
 
           allowed_roots = {
-              "src", "tests", "docs", "examples", "README.md", "pyproject.toml",
+              "src", "tests", "docs", "examples", "benchmarks", "README.md", "pyproject.toml",
               "LICENSE", "NOTICE", "CITATION.cff", "CHANGELOG.md", ".gitignore", "PKG-INFO",
           }
           forbidden_parts = {
               "data", "reset-x-study", ".pyxcom", "__pycache__", ".pytest_cache",
               ".mypy_cache", ".ruff_cache", ".venv", "node_modules",
           }
-          # Unreleased scheduler drafts are excluded; integrity/recovery modules ship.
-          forbidden_names = {"pool.py", "test_pool.py", "test_pool_cli.py", "pool.md"}
 
           def check(name, *, source=False):
               path = PurePosixPath(name)
@@ -63,7 +61,7 @@ jobs:
                   raise SystemExit(f"Unexpected wheel file: {name}")
               for part in parts:
                   lower = part.lower()
-                  if (part in forbidden_parts or part in forbidden_names
+                  if (part in forbidden_parts
                           or lower == ".env" or lower.startswith(".env.")
                           or "cookie" in lower or lower.endswith((".pyc", ".pyo"))):
                       raise SystemExit(f"Private or draft artifact in distribution: {name}")
@@ -115,6 +113,7 @@ jobs:
           "$test_dir/venv/bin/python" -m pip install "$GITHUB_WORKSPACE"/dist/*.whl
           "$test_dir/venv/bin/python" -m pip check
           cp -R tests "$test_dir/tests"
+          cp -R benchmarks "$test_dir/benchmarks"
           cd "$test_dir"
           "$test_dir/venv/bin/python" -I - <<'PYCODE'
           from pathlib import Path
