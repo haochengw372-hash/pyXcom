@@ -1,53 +1,94 @@
-> **使用请引用：Haocheng Wang。** 如果你在论文、数据集或其他研究成果中使用 pyXcom，请引用 [CITATION.cff](CITATION.cff) 中的软件信息，并注明使用版本；[引用格式](#citation)见下文。
 # pyXcom
 
-**使用前请自行打开 Chrome、Edge 或 Safari 并登录 X。pyXcom 不会打开或控制浏览器，也不会替你登录。**
+A Python package for collecting public posts, profiles, replies and metadata from X using an existing browser session.
 
-Collect public X user profiles, posts, replies, search results and observed network relationships using your existing Chrome, Edge or Safari session. Post datasets contain three linked CSV tables: `users.csv`, `posts.csv` and `comments.csv`; network datasets have separate relationship and snapshot tables.
+pyXcom is designed for research that starts with an account, a keyword, a date range or a specific post. Its main features are:
 
-Version 1.0.1 keeps the get/save API and adds explicit saved-data integrity assessment and guarded recovery generations. Readable posts survive mixed source pages, profile history follows stable user IDs, and JSONL preserves Unicode text. See the [release notes](CHANGELOG.md), [saved-data rules](docs/stability.md), and [recovery workflow](docs/recovery.md).
+- Get user profiles and individual posts.
+- Collect an account's main posts, authored replies or both.
+- Search one account for a phrase, or run a native X search query.
+- Collect replies below a post or reply, including nested comments.
+- Collect visible quote posts, repost activity and follower/following snapshots.
+- Save linked CSV tables, raw response JSON, observation history and collection checkpoints.
+- Inspect saved-data integrity and prepare verified recovery copies offline.
 
-The author reports field use with approximately 130,000 collected records. This experience informed the persistence and recovery checks; it is not a benchmark, a verified unique-post total, or proof of complete historical coverage. Collection remains limited to results returned by X.
+**Before using pyXcom, open Chrome, Edge or Safari yourself and sign in to X.** The package reads your existing session; it does not open a browser or log in for you.
 
-Version 1.0.1 also handles account timelines that return nonempty duplicate pages with changing cursors. A saved no-progress streak pauses as partial coverage across calls, and explicitly pinned posts no longer mask the date boundary. See [timeline pagination](docs/timeline-pagination.md).
+X can change its endpoints or limit the content it returns. Saved results include completion status and stopping reasons so you can report the observed coverage.
 
-The interface follows [PykTok](https://github.com/dfreelon/pyktok)'s approachable get/save convention, with explicit parameters and resumable datasets. pyXcom is an independent implementation; it does not depend on PykTok or twikit.
+> If you use pyXcom in a paper, dataset or other research output, please cite **Haocheng Wang** and report the version used. See [Citation](#citation) and [CITATION.cff](CITATION.cff).
 
-## Install
-
-Python 3.10 or newer:
+## Installation
 
 ```bash
 python -m pip install pyXcom
 ```
 
-From a cloned repository, use `python -m pip install .`.
-
-Or in a development environment:
+To install from a cloned repository:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e .
+python -m pip install .
 ```
 
-The distribution name is `pyXcom`; the import and command are `pyxcom`.
+For an editable development installation, use `python -m pip install -e .` in a virtual environment. The distribution is named `pyXcom`; the Python import and command-line program are named `pyxcom`.
 
-## Quick start
+## Requirements
 
-1. Open Chrome yourself and sign in to X.
-2. Find your profile at `chrome://version` → **Profile Path**. Use its folder name, such as `Default` or `Profile 3`.
-3. Run:
+- Python 3.10 or later.
+- A local Chrome or Edge profile already signed in to X, or Safari on macOS.
+- Access to that browser's cookie storage from the application running Python.
+
+The runtime dependencies are installed by pip:
+
+- [browser-cookie3](https://pypi.org/project/browser-cookie3/)
+- [Beautiful Soup](https://pypi.org/project/beautifulsoup4/)
+- [HTTPX](https://pypi.org/project/httpx/)
+
+## Usage
+
+Sign in to X manually, then select the browser profile you used. In Chrome, open `chrome://version` and look at **Profile Path**. Pass the folder name, such as `Default` or `Profile 3`, rather than your X username.
 
 ```python
 from pyxcom import XClient
 
 with XClient(profile="Default") as client:
-    user = client.get_user("thsottiaux")
-    print(user.name, user.followers_count)
+    user = client.get_user("OpenAI")
+    print(user.id, user.name, user.followers_count)
+```
 
-    result = client.save_user_activity(
-        "thsottiaux",
-        output_dir="output/tibo_year",
+The context manager closes the HTTP connection when the block ends. Cookies remain in memory and are sent only to X; request credentials are excluded from the saved response archives.
+
+The function names follow a get/save convention inspired by [PykTok](https://github.com/dfreelon/pyktok):
+
+- `get_*` returns a `Profile`, a `Post`, or a list of records to memory.
+- `iter_*` yields records as you consume the iterator.
+- `save_*` writes a dataset and returns a `CollectionResult` with counts, completion status and a stopping reason.
+
+Get methods return Python records, not DataFrames. See the [API reference](docs/api.md) for all signatures and compatibility names.
+
+### Get a post or its raw JSON
+
+Use a numeric post ID or an X post URL:
+
+```python
+with XClient(profile="Default") as client:
+    post = client.get_post("1973931546550894681")
+    print(post.id, post.text, post.created_at_utc)
+
+    raw = client.get_raw_post("1973931546550894681")
+```
+
+`get_raw_post()` returns the platform's response dictionary. Use it when you need fields beyond the normalized `Post` record. Replace the example ID with a post from your study.
+
+### Save posts from one account
+
+To save authored main posts within a date range:
+
+```python
+with XClient(profile="Default") as client:
+    result = client.save_user_posts(
+        "OpenAI",
+        output_dir="output/openai_posts",
         since="2025-09-29",
         until="2026-09-30",
         max_pages=2,
@@ -55,133 +96,71 @@ with XClient(profile="Default") as client:
     print(result.to_dict())
 ```
 
-Repeat the same call and output directory to resume. `max_pages=2` fetches at most two pages **per timeline per call**. Remove this option to continue paging until the source ends or the date boundary is reached. A saved partial result reports its stop reason.
+Dates use UTC: `since` is inclusive and `until` is exclusive. `max_pages=2` limits this invocation to two timeline pages. Repeat the same query and output directory to resume a task stopped by its page budget.
 
-Optional constructor settings include `browser="edge"`, `cookie_db=...`, `proxy=...`, `delay=1.0`, and `timeout=30`. Cookies are read into memory and sent only to X. No passwords or exported cookie files are needed.
-
-### Safari on macOS
-
-Use an existing Safari login without launching a browser:
+Use `save_user_replies()` for replies **written by that account**, including self-replies. To save main posts and authored replies together:
 
 ```python
-with XClient(browser="safari") as client:
-    profile = client.get_user("OpenAI")
+with XClient(profile="Default") as client:
+    result = client.save_user_activity(
+        "OpenAI",
+        output_dir="output/openai_activity",
+        since="2025-09-29",
+        until="2026-09-30",
+        max_pages=2,
+    )
 ```
 
-```bash
-pyxcom user OpenAI --browser safari
-```
-
-Safari reads `Cookies.binarycookies` using the already included `browser-cookie3`. Omit `profile`: Safari profile selection is not supported by this adapter. For storage outside the supported default locations, use `cookie_db="/accessible/path/Cookies.binarycookies"` or CLI `--cookie-db`. Chrome and Edge still use their existing profile/database options.
-
-If macOS denies file access, pyXcom reports an `AuthenticationError` identifying the permission issue. The user may authorize the application running pyXcom (such as their terminal or Codex) in **System Settings → Privacy & Security → Full Disk Access**, then retry. The package does not change permissions or fall back past denied access. Missing storage, an unsupported cookie-file format, and absence of the required X login cookies are reported separately. This does not establish that an expired session is still accepted by X.
-
-## Python functions
-
-Methods belong to `XClient`. Every method lists its accepted parameters explicitly.
-
-| Task | Get into memory | Stream records | Save a dataset |
-| --- | --- | --- | --- |
-| User profile | `get_user(handle)` | — | — |
-| Post by ID or URL | `get_post(post_id_or_url)` | — | — |
-| Multiple post IDs | `get_posts(post_ids)` | — | — |
-| Authored main posts | `get_user_posts(handle, ...)` | `iter_user_posts(handle, ...)` | `save_user_posts(handle, output_dir, ...)` |
-| Authored replies | `get_user_replies(handle, ...)` | `iter_user_replies(handle, ...)` | `save_user_replies(handle, output_dir, ...)` |
-| Replies below a post or reply | `get_post_comments(post_id_or_url, ...)` | `iter_post_comments(post_id_or_url, ...)` | `save_post_comments(post_id_or_url, output_dir, ...)` |
-| Keyword matches | `get_search_posts(keyword, ...)` | `iter_search_posts(keyword, ...)` | `save_search_posts(keyword, output_dir, ...)` |
-| Native cross-user query | `get_search_query(query, ...)` | `iter_search_query(query, ...)` | `save_search_query(query, output_dir, ...)` |
-| Quotes of a post | `get_post_quotes(post_id_or_url, ...)` | `iter_post_quotes(post_id_or_url, ...)` | `save_post_quotes(post_id_or_url, output_dir, ...)` |
-| Account repost activity | `get_user_reposts(handle, ...)` | `iter_user_reposts(handle, ...)` | `save_user_reposts(handle, output_dir, ...)` |
-| Followers / following | `get_followers(user_id, ...)` / `get_following(user_id, ...)` | `iter_followers(user_id, ...)` / `iter_following(user_id, ...)` | `save_followers(user_id, output_dir, ...)` / `save_following(user_id, output_dir, ...)` |
-| Reposter user list | `get_post_reposters(post_id_or_url, ...)` | `iter_post_reposters(post_id_or_url, ...)` | `save_post_reposters(post_id_or_url, output_dir, ...)` |
-| Main posts + replies | — | — | `save_user_activity(handle, output_dir, ...)` |
-| Multiple accounts | — | — | `save_users_activity(handles, output_dir, ...)` |
-
-- `get_*` returns a `Profile`, `Post`, `list[Post]`, or network `list[Profile]`; it does not write a dataset.
-- `iter_*` returns an iterator. Requests happen as it is consumed.
-- `save_*` returns `CollectionResult` with `output_dir`, `post_count`, `pages_fetched`, `complete`, and `reason`. For post datasets `post_count` counts unique records, including replies; for network datasets this compatibility field counts observed users. Consult each manifest for table counts and coverage.
-- Parameters: `handle` for one account, `handles` for several, `keyword` for search, `output_dir` for saved datasets, and `since`/`until` for dates. Options are keyword-only.
-- Dates are UTC: `since` inclusive, `until` exclusive. `max_pages` and `limit` must be positive integers or `None`. Saved timeline/mirror `limit` is a page-boundary stopping threshold, so a final page can exceed it; iterator limits are exact.
-
-See [API reference](https://github.com/haochengw372-hash/pyXcom/blob/main/docs/api.md) for signatures, return types and compatibility names.
+For `save_user_activity()`, the page budget applies to each timeline separately. To inspect main posts without saving a dataset, use `get_user_posts()` or `iter_user_posts()`.
 
 ### Search one account
+
+To match a literal phrase against an account's main posts and authored replies:
 
 ```python
 with XClient(profile="Default") as client:
     matches = client.get_search_posts(
         "reset", handle="thsottiaux",
-        since="2025-09-29", until="2026-09-30", limit=20,
+        since="2025-09-29", until="2026-09-30",
+        max_pages=2, limit=20,
     )
+
     result = client.save_search_posts(
         "reset", output_dir="output/tibo_reset",
-        handle="thsottiaux", since="2025-09-29", until="2026-09-30",
+        handle="thsottiaux",
+        since="2025-09-29", until="2026-09-30",
+        max_pages=2,
     )
 ```
 
-Direct account search scans main posts and authored replies, then matches a literal word/phrase without case sensitivity. Matching posts do not represent deduplicated real-world events. Cross-user search requires an explicit `mirror_base`; it sends search terms to that mirror and retrieves discovered post details from X. No mirror is enabled by default.
+This search is case-insensitive and its page budget applies to each authored stream. A keyword match identifies a mention; several matching messages may concern the same event.
 
-### Native search, quotes and repost activity
+### Run a native X search
 
-`*_search_query` submits X search syntax to the native Latest search endpoint; it does not require or use a mirror. `*_search_posts` retains its account/literal behavior above. Use a separate output directory for each query or source:
+Use `save_search_query()` for X search syntax, including account conditions and keyword combinations:
 
 ```python
 with XClient(profile="Default") as client:
     result = client.save_search_query(
-        '("usage reset" OR "rate limit reset") (OpenAI OR Codex)',
-        "output/reset_search", since="2025-09-29", until="2026-09-30",
+        "from:OpenAI (reset OR restart)",
+        output_dir="output/openai_search",
+        since="2025-09-29", until="2026-09-30",
         max_pages=2, limit=100,
     )
     print(result.complete, result.reason)
-    client.save_post_quotes("1973931546550894681", "output/reset_quotes", max_pages=2)
-    client.save_user_reposts("thsottiaux", "output/tibo_reposts", max_pages=2)
 ```
 
-Quote discovery uses native search followed by a check of `quoted_post_id`; zero matches do not establish zero quotes. Repost activity is collected from visible account timeline wrappers, preserving the repost ID and its action timestamp separately from the original post ID/time. A flattened timeline that only returns originals cannot establish action times and reports `repost_activity_unavailable` with an incomplete result. It is not a complete historical repost archive. Search sorting, visibility and pagination remain controlled by X.
+`get_search_query()` and `iter_search_query()` provide the corresponding memory and iterator interfaces. These methods use the native Latest endpoint without a search mirror. Use a separate output directory for each query; changing a saved query or date scope requires a new dataset.
 
-Discovery pauses when the source keeps changing cursors without useful pagination: 3 consecutive cursor-only/empty pages produce `empty_page_limit`, and 5 pages without new primary source IDs produce `no_progress_limit`. Both are incomplete results. Counters persist across save/resume calls and appear in `manifest.json.discovery_pagination`; tweets excluded by date or quote filters are still source content, so a filtered zero is not an empty-page signal.
+### Collect replies below a post
 
-Paused saves retain raw responses and the last cursor. Calling the same save normally preserves the pause without more requests. If you deliberately want to probe the source later, repeat it with `retry_stalled=True` (CLI `--retry-stalled`); this resets the streak without discarding records, raw archives or the cursor. These thresholds are a conservative stopping heuristic and do not prove all historical posts were collected. A fresh query with genuine new source posts continues normally. See [API reference](https://github.com/haochengw372-hash/pyXcom/blob/main/docs/api.md) for the precise stopping and retry contract.
-
-Readable posts on a page are retained even when another tweet slot is unavailable. `manifest.json.source_content` records unavailable or unparsed observations without guessing why content is missing. Known unavailable slots allow paging to continue; unknown shapes pause with `partial_source_content` and retain the request cursor. Reaching the visible end after a content warning remains incomplete; another stop such as `repeated_cursor` can take precedence while the warning stays in the manifest. Memory/iterator methods expose content coverage in `client.last_discovery_collection`; use a save method for a persistent report.
-
-### Follow networks and reposter lists
-
-Resolve a handle with `get_user(handle).id`, then pass that stable numeric ID to follower/following methods:
-
-```python
-with XClient(profile="Default") as client:
-    user_id = client.get_user("thsottiaux").id
-    client.save_followers(user_id, "output/tibo_network", max_pages=2, snapshot_id="wave-1")
-    client.save_following(user_id, "output/tibo_network", max_pages=2, snapshot_id="wave-1")
-    client.save_post_reposters("1973931546550894681", "output/reset_reposters", max_pages=2)
-```
-
-Follow edges point from follower to followed account. `follow_edges.csv`, `reposters.csv`, `user_snapshots.csv` and `network_manifest.json` preserve observed relationships, user profiles and coverage per snapshot. A reposter list identifies who visibly reposted a post, but its `action_time_utc` is unknown. Use account repost activity when the wrapper supplies an action time; never substitute the original post time.
-
-Network saves resume a recoverable unfinished snapshot. Once completed or stopped by a terminal bad cursor, calling again without `snapshot_id` creates a new observation; explicitly reusing a completed ID returns that saved snapshot. Memory/iterator methods raise endpoint, parse or rate-limit errors and retain coverage in `last_network_collection`; hitting a budget returns the observed prefix. Saves return an incomplete result and preserve checkpoints on source failures. Network and post collections require separate output directories to protect their different `users.csv` exports. Follow observations cannot establish when a relationship began or reconstruct a historical follow network. Keep collection dates in the analysis. See [examples/research_networks.py](examples/research_networks.py) for a small collection recipe; importing it does not collect data.
-
-### Collect several accounts
-
-```python
-with XClient(profile="Default") as client:
-    result = client.save_users_activity(
-        ["OpenAI", "AnthropicAI", "thsottiaux", "sama", "alexalbert__", "bcherny"],
-        output_dir="output/ai_year",
-        since="2025-09-29", until="2026-09-30",
-        pages_per_round=5, rounds=1,
-    )
-```
-
-Repeat to resume. `rounds=0, wait_on_rate_limit=True` keeps running and waits for rate windows when needed. `progress=callback` receives status dictionaries.
-
-## Collect a post or reply and nested comments
+To collect direct replies and replies to those comments:
 
 ```python
 with XClient(profile="Default") as client:
     result = client.save_post_comments(
         "1973931546550894681",
-        output_dir="output/tibo_conversation",
+        output_dir="output/conversation",
         max_depth=2,
         max_comments=100,
         max_pages=20,
@@ -189,159 +168,186 @@ with XClient(profile="Default") as client:
     print(result.complete, result.reason)
 ```
 
-```bash
-pyxcom post-comments 1973931546550894681 --profile Default \
-  --max-depth 2 --max-comments 100 --max-pages 20 \
-  --output-dir output/tibo_conversation
+The seed can be a main post or a reply. `max_depth=2` follows two reply levels below that seed. `max_comments` is the cumulative descendant cap and excludes the seed; `max_pages` limits requests during this call.
+
+Repeat the same seed, depth, dates and output directory to resume. Raise the comment cap to continue a capped dataset. Pending page records are retained so a cap does not discard the rest of a partly processed page.
+
+For a main-post seed, the root enters `posts.csv` and descendants enter `comments.csv`. A reply seed remains in `comments.csv`. `seed_post_id` and `seed_relative_depth` describe the requested branch; platform root, parent and depth fields describe the retained ancestry. Unknown ancestry stays unresolved. `get_post_comments()` and `iter_post_comments()` return descendants without writing a dataset.
+
+### Collect several accounts
+
+One client can collect several target accounts using the same authenticated browser session:
+
+```python
+with XClient(profile="Default") as client:
+    result = client.save_users_activity(
+        ["OpenAI", "AnthropicAI", "thsottiaux",
+         "sama", "alexalbert__", "bcherny"],
+        output_dir="output/ai_accounts",
+        since="2025-09-29", until="2026-09-30",
+        pages_per_round=5, rounds=1,
+    )
 ```
 
-The seed can be a main post or a reply. Level 1 replies directly to that seed; level 2 replies to those comments. Main seeds belong in `posts.csv`; reply seeds remain replies in `comments.csv`. `seed_post_id` and `seed_relative_depth` describe this branch; `root_post_id`, `parent_post_id` and `depth` retain actual conversation relationships and do not relabel a reply as a platform root. Ancestors returned as context are stored in `context_posts.csv`, not counted as collected descendants. `since`/`until` filter descendant timestamps; traversal retains the ancestry needed to reach in-window descendants. Quoted content, unrelated recommendations and comments beyond the requested depth are excluded. Profile details absent from the response remain unavailable.
+Repeat to continue saved account tasks. The [API reference](docs/api.md) describes rounds, progress callbacks and rate-limit waiting.
 
-Offline `validate_collection` checks the UTC window for analysis descendants. The requested seed and records explicitly marked `observation_role="context"` can be outside that window because they preserve relationships; their IDs, saved artifacts and hashes are still checked. This exception applies only to `post_comments`, not to searches or account timelines. Older records without an observation role remain subject to date checks unless they are the requested seed.
+### Collect quotes, reposts and network snapshots
 
-`max_comments` is an exact total comment cap, excluding the root. `max_pages` caps conversation requests per call. Repeat the same root/depth/output to resume saved branches and cursors; raise the comment cap to continue a capped dataset. Pending page records are retained, so stopping midway through a page does not skip them. Changing depth requires a separate dataset. Python accepts `None` for unlimited comment/page budgets; depth must be positive.
+Quotes and repost activity have their own methods and output directories:
 
-Stop reasons include `comment_limit`, `page_limit`, `rate_limited`, `partial_conversation`, and `visible_source_end`. `complete=true` means the visible queue was exhausted **within the requested depth**, not that every comment on X was recovered. Missing ancestors and stalled pagination are reported as partial. `iter_post_comments` / `get_post_comments` return reply records without writing a dataset; use `save_post_comments` when you need coverage status and resumability.
+```python
+with XClient(profile="Default") as client:
+    client.save_post_quotes(
+        "1973931546550894681", "output/quotes", max_pages=2,
+    )
+    client.save_user_reposts(
+        "OpenAI", "output/repost_activity", max_pages=2,
+    )
+```
+
+Quote discovery checks the returned target identifier. Repost activity preserves action IDs and times when X returns the required wrappers; flattened originals cannot supply a repost action time.
+
+For followers and following, first resolve the account's stable numeric ID:
+
+```python
+with XClient(profile="Default") as client:
+    user_id = client.get_user("OpenAI").id
+    client.save_followers(
+        user_id, "output/openai_network",
+        max_pages=2, snapshot_id="wave-1",
+    )
+    client.save_following(
+        user_id, "output/openai_network",
+        max_pages=2, snapshot_id="wave-1",
+    )
+    client.save_post_reposters(
+        "1973931546550894681", "output/reposters", max_pages=2,
+    )
+```
+
+Network datasets use separate directories from post collections. Follow edges point from follower to followed account and describe an observed snapshot, not when the relationship began. A reposter list identifies visible users; it does not supply individual repost action times. See [the network example](examples/research_networks.py) and [snapshot rules](docs/api.md#network-lists-and-snapshots).
+
+### Choose another browser or adjust request settings
+
+```python
+with XClient(browser="edge", profile="Default", delay=2.0) as client:
+    user = client.get_user("OpenAI")
+
+# macOS only; Safari does not use the profile argument.
+with XClient(browser="safari") as client:
+    user = client.get_user("OpenAI")
+```
+
+The constructor also accepts `cookie_db`, `proxy` and `timeout`. Safari uses `Cookies.binarycookies`; you can select an accessible file with `cookie_db`. If macOS denies access, follow the `AuthenticationError` guidance for the application running Python. The package does not change system permissions. Browser options are described in the [API reference](docs/api.md#client).
 
 ## Output
 
+A saved post collection has this basic layout:
+
 ```text
-output/tibo_year/
+output/openai_activity/
 ├── users.csv
 ├── posts.csv
 ├── comments.csv
 ├── manifest.json
-└── .pyxcom/             # Checkpoints, observations, source streams and reports
+└── .pyxcom/
 ```
 
-| Table | Unit | Main keys |
+| File | Contents | Main identifiers |
 | --- | --- | --- |
-| `users.csv` | One user | `user_id`, `username`, `display_name` |
-| `posts.csv` | One original or quote main post | `post_id`, `author_id`, `post_type`, `quoted_post_id` |
-| `comments.csv` | One reply at any observed depth | `comment_id`, `author_id`, `root_post_id`, `parent_post_id`, `depth` |
+| `users.csv` | One consolidated row per user | `user_id`, `username` |
+| `posts.csv` | Original and quote main posts | `post_id`, `author_id`, `post_type` |
+| `comments.csv` | Replies, including self-replies | `comment_id`, `author_id`, `root_post_id`, `parent_post_id`, `depth` |
+| `manifest.json` | Query scope, counts, coverage, stop reason and hashes | Dataset metadata |
+| `.pyxcom/` | Raw responses, observations and resume state | Private collection files |
 
-Replies to oneself remain comments. A quote within a reply retains its quote link in `comments.csv`. Direct replies are depth 1; replies to those are depth 2. Missing ancestry leaves `depth` empty with a `depth_status`; `parent_in_dataset` and `root_in_dataset` indicate observed relationships. Do not interpret missing parents as first-level replies.
+Quote links inside replies stay in `comments.csv`. Missing parents do not become guessed first-level replies. For conversations, read `seed_relative_depth` separately from platform `depth` when the seed itself is a reply.
 
-`user_replies` means replies **authored by the selected account**. Use `*_post_comments` to collect replies below a particular post or reply from all visible authors, including nested replies. Neither endpoint establishes full conversation coverage.
+Depending on the observations, exports also include `interactions.csv`, `post_edges.csv`, `context_posts.csv`, `metric_snapshots.csv` and `profile_snapshots.csv`. Canonical message tables retain the first saved observation of each ID; subsequent observations and metrics remain in the archives. `users.csv` selects a profile by stable user ID, while profile snapshots retain earlier handles and returned details.
 
-CSV conventions: UTF-8 with BOM, snake_case columns, string IDs (import as text in Excel), JSON arrays for list fields, empty values for unavailable scalars, UTC timestamp fields. Users without a saved profile have `profile_available=false`. Engagement counts are snapshots; unknown values are not replaced with zero.
+CSV files use UTF-8 with BOM, snake_case columns, UTC timestamps and JSON arrays for list fields. Import IDs as text in spreadsheets. Missing values remain unavailable rather than becoming zero. Engagement values are retrieval-time snapshots.
 
-If source records include pure reposts, an additional `interactions.csv` preserves them. The current authored-account collector does not establish complete repost activity. `manifest.json` records schema/layout versions, table counts, collection scope, relationship coverage and hashes. `.pyxcom/` must be retained for resuming; the three CSV files can be shared independently for analysis.
+Network collections have their own `users.csv`, `user_snapshots.csv`, relationship files and `network_manifest.json`. Keep `.pyxcom/` when you need to resume or verify a collection. See [saved-data rules](docs/stability.md) for archive and export details.
 
-`users.csv` groups profiles by stable `user_id`, so a changed handle, biography or counter does not create a second user or invalidate the dataset. It shows the latest valid capture, using field completeness and canonical JSON to resolve equal timestamps deterministically. `profile_snapshots.csv` retains each source-labelled snapshot, including old handles and capture times; `.pyxcom/profile_observations.jsonl` preserves history before the handle-keyed profile view is replaced. Conflicting nonempty account creation timestamps still fail validation. See [saved-data rules](docs/stability.md) for selection and resume behavior.
+## Saved progress and coverage
 
-Saved collection pages also retain platform response JSON under `.pyxcom/raw/` (network pages under their snapshot state) and query provenance in `.pyxcom/collection_log.jsonl`. Repeated post observations keep returned engagement metrics in `metric_snapshots.csv`, with source observations in `.pyxcom/observations.jsonl` and metric history in `.pyxcom/metric_snapshots.jsonl`. Unreturned counts remain unavailable. These are observations at retrieval time, not historical metrics at publication. Credentials are not included in the response archive.
+Inspect `result.complete` and `result.reason`, or their values in `manifest.json`. `CollectionResult.post_count` counts unique retained message records, including replies; network methods use that compatibility field for observed users.
 
-When source records contain reply, quote or repost relationships, `post_edges.csv` exports their directions, source/target post and user IDs, action and observation times, and target availability/resolution flags. An unavailable target is retained; its user ID stays empty if unresolved. Known target authors can appear in `users.csv` as stubs with `profile_available=false`. Context-only records do not create source edges. Relationship, context and metric exports appear when observations provide the corresponding data.
+A page or item budget can leave a resumable partial result. A source end or reached date boundary describes the endpoint traversal, not exhaustive historical coverage. Deleted, protected, hidden or otherwise unavailable content can be absent.
+
+Account timelines pause with `no_progress_limit` after five consecutive pages without new primary source IDs. This state persists across calls; repeating a paused save does not request more timeline pages. Explicit pins remain collectable but do not mask the date-boundary check. See [timeline pagination](docs/timeline-pagination.md).
+
+Native search, quote discovery and repost activity have separate persisted pagination counters. Their save methods support an explicit `retry_stalled=True` to probe a paused source again. That option is not part of the authored timeline API. Dates and other local filters are applied after source progress is measured; an empty filtered page is not an empty-source signal. The [API reference](docs/api.md#native-discovery) covers content warnings, pause thresholds and retry behavior.
+
+Saved timeline limits are checked at page boundaries and may overshoot a record threshold; conversation comment caps are exact. Use the [API reference](docs/api.md) for each method's budget semantics and older compatibility names.
+
+## Validate saved data
+
+Validation is offline and does not require browser cookies:
+
+```python
+from pyxcom import assess_recovery, validate_collection
+
+report = validate_collection("output/openai_activity")
+print(report["valid"], report["errors"])
+
+assessment = assess_recovery("output/openai_activity")
+print(assessment["record_integrity"], assessment["latest_checkpoint"])
+```
+
+Validation and complete acquisition are separate checks. A consistent partial dataset can pass validation. Export and finalization refuse unsafe saved sources; they do not restore missing records by assigning new hashes.
+
+If intact sources have stale derived files, [the recovery guide](docs/recovery.md) describes how to prepare an external generation, verify it and explicitly apply it. Keep independently retained receipts and coordinate other writers before application. Recovery does not reconstruct lost source records, invent a cursor or prove historical login identity.
 
 ## Command line
 
-CLI task names correspond to the Python methods:
+The `pyxcom` command exposes the same collection tasks:
 
 ```bash
-pyxcom user thsottiaux --profile Default
-pyxcom user-posts thsottiaux --profile Default --output-dir output/tibo_posts
-pyxcom user-replies thsottiaux --profile Default --output-dir output/tibo_replies
-pyxcom user-activity thsottiaux --profile Default \
-  --since 2025-09-29 --until 2026-09-30 --output-dir output/tibo_year
-pyxcom search-posts reset --handle thsottiaux --profile Default \
-  --since 2025-09-29 --until 2026-09-30 --output-dir output/tibo_reset
-pyxcom users-activity --handles OpenAI AnthropicAI --profile Default \
-  --since 2025-09-29 --until 2026-09-30 --output-dir output/ai_year
-pyxcom search-query '("usage reset" OR "rate limit reset") Codex' --profile Default \
-  --since 2025-09-29 --until 2026-09-30 --max-pages 2 --output-dir output/reset_search
-pyxcom post-quotes 1973931546550894681 --max-pages 2 --output-dir output/reset_quotes
-pyxcom user-reposts thsottiaux --max-pages 2 --output-dir output/tibo_reposts
-pyxcom user-followers USER_ID --max-pages 2 --snapshot-id wave-1 --output-dir output/network
-pyxcom user-following USER_ID --max-pages 2 --snapshot-id wave-1 --output-dir output/network
-pyxcom post-reposters 1973931546550894681 --max-pages 2 --output-dir output/reposters
+pyxcom user OpenAI --profile Default
+pyxcom user-activity OpenAI --profile Default \
+  --since 2025-09-29 --until 2026-09-30 --max-pages 2 \
+  --output-dir output/openai_activity
+pyxcom search-query 'from:OpenAI reset' --profile Default \
+  --max-pages 2 --output-dir output/openai_search
+pyxcom post-comments 1973931546550894681 --profile Default \
+  --max-depth 2 --max-comments 100 --max-pages 20 \
+  --output-dir output/conversation
+pyxcom validate --output-dir output/openai_activity
 ```
 
-Add `--proxy URL` if your network requires one. Use `pyxcom COMMAND --help` for task options. Individual `user`, `post`, and `raw-post` commands accept `--output FILE` for a JSON file.
+Run `pyxcom --help` or `pyxcom COMMAND --help` for all options. Add `--proxy URL` when your network requires one. Python and CLI compatibility names remain listed in the [API reference](docs/api.md#backward-compatible-names).
 
-`post-comments --max-comments all --max-pages all` removes comment/page caps; `--max-depth` still requires a positive integer (default 2). New discovery/network commands also accept `all` for `--max-pages` and `--limit`. Unlimited budgets do not remove visibility or rate limits.
+## Documentation and development
 
-## Export, migration and verification
+- [Public API and return types](docs/api.md)
+- [Saved-data rules](docs/stability.md)
+- [Account timeline pagination](docs/timeline-pagination.md)
+- [Recovery workflow](docs/recovery.md)
+- [Examples](examples/)
+- [Release notes](CHANGELOG.md)
+- [Publishing](docs/publishing.md)
 
-These operations work offline, without browser credentials:
-
-```python
-from pyxcom import export_tables, validate_collection, finalize_collection
-
-export_tables("output/ai_year")
-print(validate_collection("output/ai_year"))
-# Rebuild only when the saved source passes integrity checks:
-finalize_collection("output/ai_year")
-```
+To check an editable development installation:
 
 ```bash
-pyxcom export --output-dir output/ai_year
-pyxcom validate --output-dir output/ai_year
-pyxcom finalize --output-dir output/ai_year
-pyxcom schema --output-dir output/ai_year
+PYTHONPATH=src python -m unittest discover -s tests
+ruff check src tests examples
 ```
 
-Opening/exporting a legacy dataset migrates its recognized internal files into `.pyxcom/`, with originals backed up under `.pyxcom/legacy/`. It publishes the three tables at the root; the previous mixed `posts.csv` is retained internally. Unrelated user files are left in place. Conflicting migration destinations fail rather than overwrite. `schema --apply` also backfills classification fields in older records; field reports live under `.pyxcom/`.
+These are offline development checks. They do not collect new X data.
 
-## Check saved data and recover derived files
+## Author and acknowledgments
 
-Keep active collection data outside directories with file synchronization. Save the full `.pyxcom/` source archive; CSV files alone cannot establish the checkpoint used for resuming.
+Created by **Haocheng Wang, Communication University of China**.
 
-```python
-from pyxcom import assess_recovery, prepare_recovery, verify_generation, apply_recovery
-
-plan = assess_recovery("output/ai_year")  # Reads only; does not repair or fetch X.
-if plan["allowed"]:
-    prepared = prepare_recovery(
-        "output/ai_year", plan=plan,
-        generation_dir="/local/archive/ai_year-generation-1",
-    )
-    checked = verify_generation(prepared["generation_dir"])
-    if checked["valid"]:
-        # Explicit application after reviewing the assessment:
-        applied = apply_recovery(
-            "output/ai_year", generation_dir=prepared["generation_dir"],
-            receipt_dir="/local/archive/receipts",
-        )
-```
-
-Prepare a generation and receipts outside the active dataset and, where possible, outside synchronized directories. Assessment refuses unknown or mismatched source integrity; it does not rebuild lost source records, guess a cursor, or backfill an observer identity. `allowed` concerns derived recovery; a separately justified unpublished timeline tail may have `resume_allowed=true` for original collection continuation while export/recovery remain blocked. Application rechecks source hashes and changes only approved derived files. It preserves the collection's incomplete status and stop reason. `export_tables()` and `finalize_collection()` raise `IntegrityError` for unsafe saved sources rather than legitimizing missing records with a new manifest.
-
-```bash
-pyxcom assess --output-dir output/ai_year
-pyxcom prepare-recovery --output-dir output/ai_year --generation-dir /local/archive/generations
-# Use the exact generation_dir returned by prepare-recovery:
-pyxcom verify-generation --generation-dir /local/archive/generations/generation-ID
-pyxcom apply-recovery --output-dir output/ai_year --generation-dir /local/archive/generations/generation-ID \
-  --receipt-dir /local/archive/receipts
-```
-
-All four commands are offline. A blocked assessment or invalid generation returns a nonzero exit code. Recovery locks coordinate cooperating recovery callers; they cannot stop collectors, legacy processes, or external synchronization from replacing files. Coordinate or stop other writers before application. Recheck retained receipts before using a generation in analysis. See [recovery](docs/recovery.md) for query/binding checks, checkpoint replay limits, and recovery acceptance criteria.
-
-## Compatibility and limitations
-
-Old Python names `get_search`, `iter_search`, `save_search` (with `user=`), and `save_accounts` remain supported. Prefer `*_search_posts` (with `handle=`) and `save_users_activity` for new code. `timeline="replies"` still works, but the explicit `*_user_replies` methods are clearer. Timeline outputs exclude same-author context of the other role. Resuming an older timeline applies the same rule and preserves its original observations in an internal compressed backup. Combined activity keeps both roles.
-
-Old CLI names `profile`, `posts`, `activity`, `search`, `batch`, `--user` and dataset `--output` remain aliases. Existing code reading root `posts.csv` as a mixed table must adapt: it now contains main posts only; replies are in `comments.csv`.
-
-X endpoints may change or impose limits. pyXcom discovers current GraphQL query IDs from X's web bundle, while response parsers still need maintenance. A completed run indicates the requested date boundary or visible source end was reached, not proof of all historical content. Deleted, protected or unavailable posts cannot be recovered. Output migration alone does not fetch comments; call `save_post_comments` to acquire them from X.
-
-
-## License
-
-pyXcom is released under the [Apache License 2.0](https://github.com/haochengw372-hash/pyXcom/blob/main/LICENSE). Copyright © 2026 Haocheng Wang. Previously published MIT versions retain their original license; see [NOTICE](NOTICE).
+[PykTok](https://github.com/dfreelon/pyktok) inspired the approachable get/save naming and task-by-task examples. pyXcom is an independent implementation and does not depend on PykTok or twikit.
 
 ## Citation
 
-**Author:** Haocheng Wang, Communication University of China.
-
-If you use pyXcom in a paper, thesis, dataset, or other research output, please cite the software and report the version used. GitHub's **Cite this repository** menu reads the machine-readable [CITATION.cff](https://github.com/haochengw372-hash/pyXcom/blob/main/CITATION.cff).
-
-**Suggested reference**
+Please cite the software and report the version you used. GitHub's **Cite this repository** menu reads [CITATION.cff](CITATION.cff).
 
 Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communication research* (Version 1.0.1) [Computer software]. https://github.com/haochengw372-hash/pyXcom
-
-**BibTeX**
 
 ```bibtex
 @software{wang2026pyxcom,
@@ -353,10 +359,8 @@ Wang, H. (2026). *pyXcom: Structured and auditable X data collection for communi
 }
 ```
 
-For reproducible reporting, also describe the collection dates, account or keyword scope, comment-depth limits, package version, and coverage/stop reasons recorded in the output manifest. No DOI or published-paper citation is currently assigned; this reference cites the software itself. Citation is appreciated and does not add a condition to the Apache-2.0 license.
+Replace the version with the one installed for your study. Report collection dates, account or keyword scope, reply-depth limits and the manifest's coverage/stop reasons alongside your analysis. Citation is appreciated and does not add a license condition.
 
-For longitudinal profiles in post datasets use `profile_snapshots.csv`; network datasets use `user_snapshots.csv`. `users.csv` is the consolidated view. Canonical post tables keep the first saved observation for each ID; later returned text and metrics remain in observation archives and metric snapshots.
+## License
 
-Offline development checks: `PYTHONPATH=src python -m unittest discover -s tests` and `ruff check src tests examples`. The source distribution includes tests; testing tools are development-only, not runtime dependencies.
-
-Live validation: current X SearchTimeline/Followers use POST read queries; Retweeters is discovered from public lazy-loaded TweetActivity assets. If a search source returns posts outside explicit dates, they are excluded locally and `manifest.json.date_scope` records the mismatch. `date_scope.returned_observations` counts source-page observations and `out_of_window_observations` counts those rejected by the local UTC filter. Pages whose records are all out of window do not stop pagination by themselves. An empty bounded result with this warning does not establish historical absence; even `complete=true, reason="source_end"` describes only the visible endpoint's pagination, not historical completeness or proof that no in-window posts exist. Request dates and query operators are preserved rather than silently shifted to compensate for source behavior. Native reposts generate only repost edges; embedded quote/reply context is not attributed as another action by the reposter.
+The current repository is licensed under [Apache-2.0](LICENSE). Previously published MIT versions retain their original license; see [NOTICE](NOTICE). Copyright © 2026 Haocheng Wang.
