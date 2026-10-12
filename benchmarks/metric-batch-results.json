@@ -1,0 +1,353 @@
+{
+  "python": "3.13.0",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "baseline_storage_sha256": "1f617bf752c772a1dc9a6ffc1b439da94e5d3ec413559b31b5633be1fff0df4d",
+  "candidate_storage_sha256": "9e937377c20a203ef864b835af298e3b4588572a17d60111a96bf089bf75e90e",
+  "design": "Offline synthetic fixtures; identical other modules; reversed arm order on alternate repeats; no timing instrumentation; separate fsync-count runs; exact hashes include all CSV and private/public manifests.",
+  "cases": [
+    {
+      "records": 1000,
+      "page_size": 50,
+      "runs": {
+        "baseline": [
+          {
+            "append_seconds": 0.08441795800172258,
+            "finish_seconds": 0.06451845899937325,
+            "restore_seconds": 0.03457895799874677,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.1318857919977745,
+            "finish_seconds": 0.06395408299795236,
+            "restore_seconds": 0.036079124998650514,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.0836623340001097,
+            "finish_seconds": 0.06329887500032783,
+            "restore_seconds": 0.0339657080003235,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          }
+        ],
+        "candidate": [
+          {
+            "append_seconds": 0.033279167000728194,
+            "finish_seconds": 0.062437374999717576,
+            "restore_seconds": 0.034494458999688504,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.0329511249983625,
+            "finish_seconds": 0.0625632500014035,
+            "restore_seconds": 0.03514345900111948,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.03512737499841023,
+            "finish_seconds": 0.06307066699810093,
+            "restore_seconds": 0.034856958998716436,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          }
+        ]
+      },
+      "all_artifact_hashes_identical": true,
+      "file_sha256": {
+        ".pyxcom/collection_log.jsonl": "f244045d50b42fb65c60a3feaa8bbb26d378f69ab61e11aa33f8a5efec17f3f4",
+        ".pyxcom/manifest.json": "996538e2bad06c96cdccc80c27234575f69758f69cfe604723a3b4f04c3e9d8d",
+        ".pyxcom/metric_snapshots.jsonl": "d8fc0b8fd06eec9025b0ee6661a1b9ae3557ba24ac5d2166d4db6a0a3ac63f4e",
+        ".pyxcom/observations.jsonl": "043509ecd0b55d290080929d73548dcff39f6adc1f78ec5632518e06fd1c09c9",
+        ".pyxcom/posts.csv": "01ff37dd0abde59cac6083354a386933c6aa911fa02a051876903b837a00eb82",
+        ".pyxcom/posts.jsonl": "043509ecd0b55d290080929d73548dcff39f6adc1f78ec5632518e06fd1c09c9",
+        ".pyxcom/state.json": "af0f7e9e1159d098bf68372fab698bff93be1a666384ea8c52e0d64129c18dde",
+        "comments.csv": "f44a554f59b129f06d4ce7379c6d863e9f8382ae1d39fd8a5af39e3b700c371c",
+        "manifest.json": "debbdbe8c9af55ef1aba364b92cf79029846f891e1edd03f9e171a8152f6083b",
+        "metric_snapshots.csv": "e539881cab8752a3763f63e3e4e5769f3325b70b431edecf59e1159ddd84a08a",
+        "post_edges.csv": "18c80e170ab4b542e53292d8e959737adf1548fd444e0b6ba9bd437dc2cb9c02",
+        "posts.csv": "5aef11814864b45e80388c20084adaa00747cf5e7d874bffaea0a65d350b70a2",
+        "users.csv": "20a95390999cb7befb392dcdebfb837f0bf9100f990f330c68d6aabdd59f8a74"
+      },
+      "baseline": {
+        "append_seconds": 0.08441795800172258,
+        "finish_seconds": 0.06395408299795236,
+        "restore_seconds": 0.03457895799874677,
+        "fsync_calls": 1070
+      },
+      "candidate": {
+        "append_seconds": 0.033279167000728194,
+        "finish_seconds": 0.0625632500014035,
+        "restore_seconds": 0.034856958998716436,
+        "fsync_calls": 90
+      }
+    },
+    {
+      "records": 1000,
+      "page_size": 500,
+      "runs": {
+        "baseline": [
+          {
+            "append_seconds": 0.07826466700134915,
+            "finish_seconds": 0.06441904200255522,
+            "restore_seconds": 0.035236332998465514,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.07456537499820115,
+            "finish_seconds": 0.06273241700182552,
+            "restore_seconds": 0.034380917000817135,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.07879758299895911,
+            "finish_seconds": 0.06366087499918649,
+            "restore_seconds": 0.03514687499773572,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          }
+        ],
+        "candidate": [
+          {
+            "append_seconds": 0.02434387500034063,
+            "finish_seconds": 0.06899883300138754,
+            "restore_seconds": 0.03418108299956657,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.02455395899960422,
+            "finish_seconds": 0.06316920800236403,
+            "restore_seconds": 0.03362470799766015,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.02415083300002152,
+            "finish_seconds": 0.06303395799841383,
+            "restore_seconds": 0.03807287499876111,
+            "fsync_calls": null,
+            "count": 1000,
+            "resume_allowed": true
+          }
+        ]
+      },
+      "all_artifact_hashes_identical": true,
+      "file_sha256": {
+        ".pyxcom/collection_log.jsonl": "44f552bb36667b14b6468ea2f09a31a65c80ea39de083959ccd21aaeefaf0892",
+        ".pyxcom/manifest.json": "2100198fa7a950d24d8c9374354670738d143883ea504e2588390488537f150e",
+        ".pyxcom/metric_snapshots.jsonl": "d8fc0b8fd06eec9025b0ee6661a1b9ae3557ba24ac5d2166d4db6a0a3ac63f4e",
+        ".pyxcom/observations.jsonl": "043509ecd0b55d290080929d73548dcff39f6adc1f78ec5632518e06fd1c09c9",
+        ".pyxcom/posts.csv": "01ff37dd0abde59cac6083354a386933c6aa911fa02a051876903b837a00eb82",
+        ".pyxcom/posts.jsonl": "043509ecd0b55d290080929d73548dcff39f6adc1f78ec5632518e06fd1c09c9",
+        ".pyxcom/state.json": "254616b4443ac1ba65f6df4a51e7588609e19332a24cbf6cb2af8edd4365bae9",
+        "comments.csv": "f44a554f59b129f06d4ce7379c6d863e9f8382ae1d39fd8a5af39e3b700c371c",
+        "manifest.json": "9ea2a834e503b6ca881789b521358af3883425182ce5d2829cc4d78917e1f6bd",
+        "metric_snapshots.csv": "e539881cab8752a3763f63e3e4e5769f3325b70b431edecf59e1159ddd84a08a",
+        "post_edges.csv": "18c80e170ab4b542e53292d8e959737adf1548fd444e0b6ba9bd437dc2cb9c02",
+        "posts.csv": "5aef11814864b45e80388c20084adaa00747cf5e7d874bffaea0a65d350b70a2",
+        "users.csv": "20a95390999cb7befb392dcdebfb837f0bf9100f990f330c68d6aabdd59f8a74"
+      },
+      "baseline": {
+        "append_seconds": 0.07826466700134915,
+        "finish_seconds": 0.06366087499918649,
+        "restore_seconds": 0.03514687499773572,
+        "fsync_calls": 1016
+      },
+      "candidate": {
+        "append_seconds": 0.02434387500034063,
+        "finish_seconds": 0.06316920800236403,
+        "restore_seconds": 0.03418108299956657,
+        "fsync_calls": 18
+      }
+    },
+    {
+      "records": 10000,
+      "page_size": 50,
+      "runs": {
+        "baseline": [
+          {
+            "append_seconds": 0.8287745000016002,
+            "finish_seconds": 0.6483161670003028,
+            "restore_seconds": 0.38335941699915566,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.8562626670027385,
+            "finish_seconds": 0.6385588749981252,
+            "restore_seconds": 0.38776133400097024,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 1.0608714169975428,
+            "finish_seconds": 0.9248975830014388,
+            "restore_seconds": 0.441167166998639,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          }
+        ],
+        "candidate": [
+          {
+            "append_seconds": 0.33527220899850363,
+            "finish_seconds": 0.6495498330004921,
+            "restore_seconds": 0.3775444589991821,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.33774724999966566,
+            "finish_seconds": 0.6798432499999763,
+            "restore_seconds": 0.3807368329980818,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.47384166700067,
+            "finish_seconds": 0.9552431249976507,
+            "restore_seconds": 0.41577187499933643,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          }
+        ]
+      },
+      "all_artifact_hashes_identical": true,
+      "file_sha256": {
+        ".pyxcom/collection_log.jsonl": "afa1329ec759c3a00c79e62e29a3c7d52bceeda3a6cb8183ea114f10aaf3b7cd",
+        ".pyxcom/manifest.json": "8859f6bb8cbfbe40fbe91091cdfb07442ae3f4b5cbaf4f6e8e1ae2d645e34270",
+        ".pyxcom/metric_snapshots.jsonl": "0e3b4485efd415011e614c5698a18f9624d3edae6df754b47928bf476be59e71",
+        ".pyxcom/observations.jsonl": "ab4a57fe0c37e63159887a330b1b4ae958106a92ec7ada39c3de00cb2d961fe6",
+        ".pyxcom/posts.csv": "4c513ec65b8463fd54a6dd067bfcc4ec6e8c542c1397e9b3311e87cf5ef0681a",
+        ".pyxcom/posts.jsonl": "ab4a57fe0c37e63159887a330b1b4ae958106a92ec7ada39c3de00cb2d961fe6",
+        ".pyxcom/state.json": "912da773b223220eec2b068ce27f5b4d36d7ecac31c55cc547f282ef0af6c6bc",
+        "comments.csv": "0f24762ae06b35ca395cf52c723eb2eecdb43e455920022ee7ca92e3ae750d32",
+        "manifest.json": "d5f6cb9f34fb530589d586bd1b125fadaf9ea407374572b9e9b4672772e74785",
+        "metric_snapshots.csv": "38e2580bd38823c371b6945cd7d201524fb19ac7090c63c19bfe2e3d396d256e",
+        "post_edges.csv": "7dbabd5664fbfd9e16d822d7e0903cf0141f0f11ce494144853b1247850b4374",
+        "posts.csv": "71b5ccd0f64e624b4e962fc72d8922339635331fcb45cfae9209f7114a70920c",
+        "users.csv": "20a95390999cb7befb392dcdebfb837f0bf9100f990f330c68d6aabdd59f8a74"
+      },
+      "baseline": {
+        "append_seconds": 0.8562626670027385,
+        "finish_seconds": 0.6483161670003028,
+        "restore_seconds": 0.38776133400097024,
+        "fsync_calls": 10610
+      },
+      "candidate": {
+        "append_seconds": 0.33774724999966566,
+        "finish_seconds": 0.6798432499999763,
+        "restore_seconds": 0.3807368329980818,
+        "fsync_calls": 810
+      }
+    },
+    {
+      "records": 10000,
+      "page_size": 500,
+      "runs": {
+        "baseline": [
+          {
+            "append_seconds": 0.7837402090008254,
+            "finish_seconds": 0.6510479999997187,
+            "restore_seconds": 0.3647376670014637,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.7832456670003012,
+            "finish_seconds": 0.659862417000113,
+            "restore_seconds": 0.3752767500009213,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.8173897500018938,
+            "finish_seconds": 0.6734213340023416,
+            "restore_seconds": 0.3948559159980505,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          }
+        ],
+        "candidate": [
+          {
+            "append_seconds": 0.2441187920012453,
+            "finish_seconds": 0.6367485420014418,
+            "restore_seconds": 0.37086462500155903,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.24414066699682735,
+            "finish_seconds": 0.6507286670021131,
+            "restore_seconds": 0.3584666249989823,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          },
+          {
+            "append_seconds": 0.25380275000134134,
+            "finish_seconds": 0.661828999996942,
+            "restore_seconds": 0.39092866600185516,
+            "fsync_calls": null,
+            "count": 10000,
+            "resume_allowed": true
+          }
+        ]
+      },
+      "all_artifact_hashes_identical": true,
+      "file_sha256": {
+        ".pyxcom/collection_log.jsonl": "f244045d50b42fb65c60a3feaa8bbb26d378f69ab61e11aa33f8a5efec17f3f4",
+        ".pyxcom/manifest.json": "7c93f2416b538a8730c1cf171ba44b228ae5b3490b947d62e580b28c7febc728",
+        ".pyxcom/metric_snapshots.jsonl": "0e3b4485efd415011e614c5698a18f9624d3edae6df754b47928bf476be59e71",
+        ".pyxcom/observations.jsonl": "ab4a57fe0c37e63159887a330b1b4ae958106a92ec7ada39c3de00cb2d961fe6",
+        ".pyxcom/posts.csv": "4c513ec65b8463fd54a6dd067bfcc4ec6e8c542c1397e9b3311e87cf5ef0681a",
+        ".pyxcom/posts.jsonl": "ab4a57fe0c37e63159887a330b1b4ae958106a92ec7ada39c3de00cb2d961fe6",
+        ".pyxcom/state.json": "ad7421b6de12e0647a8880e342368cfc71165dde30b1901b63ca77ed163cf0f5",
+        "comments.csv": "0f24762ae06b35ca395cf52c723eb2eecdb43e455920022ee7ca92e3ae750d32",
+        "manifest.json": "ccd34e957ce4c9dd3cfeec8733edc60d352aa8d22d5e76d1d6e237b5d9b2d07f",
+        "metric_snapshots.csv": "38e2580bd38823c371b6945cd7d201524fb19ac7090c63c19bfe2e3d396d256e",
+        "post_edges.csv": "7dbabd5664fbfd9e16d822d7e0903cf0141f0f11ce494144853b1247850b4374",
+        "posts.csv": "71b5ccd0f64e624b4e962fc72d8922339635331fcb45cfae9209f7114a70920c",
+        "users.csv": "20a95390999cb7befb392dcdebfb837f0bf9100f990f330c68d6aabdd59f8a74"
+      },
+      "baseline": {
+        "append_seconds": 0.7837402090008254,
+        "finish_seconds": 0.659862417000113,
+        "restore_seconds": 0.3752767500009213,
+        "fsync_calls": 10070
+      },
+      "candidate": {
+        "append_seconds": 0.24414066699682735,
+        "finish_seconds": 0.6507286670021131,
+        "restore_seconds": 0.37086462500155903,
+        "fsync_calls": 90
+      }
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .client import XClient
+from .datasets import export_post_ids, validate_id_dataset
 from .layout import internal_dir
 from .errors import PyXcomError
 from .integrity import assess_recovery
@@ -64,6 +65,12 @@ def _common_parser() -> argparse.ArgumentParser:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pyxcom", description="Collect public X data")
     commands = parser.add_subparsers(dest="command", required=True)
+    ids = commands.add_parser("export-ids", help="Export verified post IDs without text or profiles")
+    ids.add_argument("--output-dir", dest="output", type=Path, required=True)
+    ids.add_argument("--destination", type=Path, required=True)
+    ids.add_argument("--roles", nargs="+", choices=("main", "comment", "repost"))
+    ids_check = commands.add_parser("validate-ids", help="Validate an exported ID dataset offline")
+    ids_check.add_argument("path", type=Path)
     # Recovery commands are offline and never construct a browser client.
     for name, help_text in (
         ("assess", "Read-only assessment of a saved dataset's recovery safety"),
@@ -468,6 +475,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "export-ids":
+            print(json.dumps(export_post_ids(args.output, args.destination, roles=args.roles)))
+            return 0
+        if args.command == "validate-ids":
+            print(json.dumps(validate_id_dataset(args.path)))
+            return 0
         if args.command == "pool":
             return _run_pool(args)
         if args.command in (

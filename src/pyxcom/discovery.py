@@ -1,13 +1,16 @@
 """Native X discovery with explicit pagination and collection provenance."""
 
+import json
 import re
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 from urllib.parse import quote
 
 from .errors import APIError, ParseError, RateLimitError
+from .layout import source_path
 from .provenance import guarded_collection
 from .models import CollectionResult, Post, Profile
 from .parse import (
@@ -248,6 +251,14 @@ def _repost_activity_unavailable(payload: dict, user_id: str) -> bool:
     return False
 
 
+def _utc_date_operators(since: str | None, until: str | None) -> str:
+    """Encode explicit midnight boundaries without platform date interpretation."""
+    return " ".join(
+        f"{name}_time:{int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp())}"
+        for name, day in (("since", since), ("until", until)) if day is not None
+    )
+
+
 def _query_options(
     query: str,
     since: str | None,
@@ -270,10 +281,18 @@ def _query_options(
         embedded = re.findall(rf"(?<![\w]){name}:([^\s)]+)", operators)
         if any(value != explicit for value in embedded):
             raise ValueError(f"Explicit {name} conflicts with a date operator in query")
+    precise = _utc_date_operators(since, until)
+    for token in precise.split():
+        name, expected = token.split(":")
+        embedded = re.findall(rf"(?<![\w]){name}:([^\s)]+)", operators)
+        if any(value != expected for value in embedded):
+            raise ValueError(f"Explicit UTC date conflicts with a {name} operator in query")
     if since:
         query += f" since:{since}"
     if until:
         query += f" until:{until}"
+    if precise:
+        query += " " + precise
     return query, since, until
 
 
@@ -439,6 +458,15 @@ class DiscoveryMixin:
     ) -> CollectionResult:
         if not isinstance(retry_stalled, bool):
             raise ValueError("retry_stalled must be a boolean")
+        # A cursor belongs to the exact remote query used to obtain it. Continue
+        # old date-encoded collections unchanged; new directories use UTC epochs.
+        precise = _utc_date_operators(query.get("since"), query.get("until"))
+        state_path = source_path(Path(output_dir), "state.json")
+        if precise and state_path.exists() and "effective_query" in query:
+            previous = json.loads(state_path.read_text(encoding="utf-8")).get("query")
+            legacy = {**query, "effective_query": query["effective_query"].removesuffix(" " + precise)}
+            if previous == legacy:
+                query = legacy
         store = PostStore(output_dir, query=query)
         if store.complete:
             return store.finish(complete=True, reason=store.state["reason"])
@@ -612,8 +640,9 @@ class DiscoveryMixin:
     ) -> Iterator[Post]:
         """Execute native cross-user search, preserving its operator syntax.
 
-        Explicit UTC date options cannot conflict with since/until operators
-        embedded in the query. Other operator semantics are controlled by X.
+        Explicit UTC dates add exact epoch bounds and cannot conflict with
+        embedded date or epoch operators. Other syntax is controlled by X.
+        Existing saved date-encoded queries retain their original cursor scope.
         """
         effective, since, until = _query_options(query, since, until, max_pages, limit)
         spec = {

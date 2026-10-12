@@ -1,6 +1,7 @@
 """pyXcom: public X collection with an existing Chrome, Edge or Safari login."""
 
 from .client import XClient
+from .datasets import export_post_ids, validate_id_dataset, iter_post_ids
 from .pool import CollectionJob, LoginConfig, XClientPool
 from .errors import (
     APIError,
@@ -20,6 +21,9 @@ from .recovery import apply_recovery, prepare_recovery, verify_generation
 
 __all__ = [
     "XClient",
+    "export_post_ids",
+    "validate_id_dataset",
+    "iter_post_ids",
     "CollectionJob",
     "LoginConfig",
     "XClientPool",
@@ -46,4 +50,4 @@ __all__ = [
     "validate_collection",
     "validate_network_collection",
 ]
-__version__ = "1.1.0"
+__version__ = "1.2.0"

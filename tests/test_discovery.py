@@ -135,7 +135,8 @@ class DiscoveryTests(unittest.TestCase):
             for call in c._x.search_page.call_args_list:
                 self.assertEqual(
                     call.args[0],
-                    "(reset OR resetting) since:2026-09-02 until:2026-09-03",
+                    "(reset OR resetting) since:2026-09-02 until:2026-09-03 "
+                    "since_time:1788307200 until_time:1788393600",
                 )
 
     def test_filtered_zero_search_preserves_warning_and_pagination_status(self):
@@ -173,7 +174,8 @@ class DiscoveryTests(unittest.TestCase):
         )
         self.assertEqual([post.id for post in result], ["1234567891"])
         client._x.search_page.assert_called_once_with(
-            '(reset OR "rate limit") (Codex OR OpenAI) since:2026-09-01 until:2026-09-02',
+            '(reset OR "rate limit") (Codex OR OpenAI) since:2026-09-01 until:2026-09-02 '
+            'since_time:1788220800 until_time:1788307200',
             cursor=None,
             product="Latest",
             count=20,

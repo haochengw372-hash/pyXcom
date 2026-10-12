@@ -118,3 +118,12 @@ exit or a worker finishing its slice.
 
 For matched live and replay comparison protocols, see
 [the benchmark tooling](../benchmarks/README.md).
+
+## Larger collections
+
+Use a measured page budget such as `page_budget=5` or `20` for throughput-oriented
+batch work. Each saver still checkpoints every page, but completes the relational
+export at the end of its slice. One-page slices provide frequent rotation and
+feedback at the cost of repeatedly verifying and exporting the accumulated
+dataset. Larger slices hold an observer longer; keep request timeouts and a
+dispatch deadline. The default remains one page for compatibility.

@@ -1,4 +1,4 @@
-# Public API — pyXcom 1.1.0
+# Public API — pyXcom 1.2.0
 
 The native discovery and network methods have passed offline tests and bounded authenticated live endpoint tests. These tests verify the exercised acquisition paths, not complete historical or network coverage.
 
@@ -220,3 +220,13 @@ supports `add_job`, `add_jobs`, `resume_job`, `run`, and context-managed close.
 `run(*, page_budget=1, max_steps=None, max_workers=4,
 wait_on_rate_limit=False, max_seconds=None)` returns a status dictionary, not
 records or a DataFrame. See [pool](pool.md) for the complete contract.
+
+## ID-only research exports
+
+`export_post_ids(output_dir, destination, *, roles=None) -> dict` exports
+analysis and seed IDs from a verified collection. `validate_id_dataset(path)`
+checks the complete schema and hashes; `iter_post_ids(path)` validates before
+yielding IDs. Roles are `main`, `comment`, and `repost`. See [datasets](datasets.md).
+
+CLI: `pyxcom export-ids --output-dir COLLECTION --destination NEW_DIR` and
+`pyxcom validate-ids NEW_DIR` run offline.

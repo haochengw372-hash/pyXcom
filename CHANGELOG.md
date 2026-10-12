@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0 — 2026-10-12
+
+### Added
+
+- Export and validate text-free post-ID datasets with `export_post_ids`,
+  `validate_id_dataset`, `iter_post_ids`, and CLI `export-ids` / `validate-ids`.
+- Include selected conversation roots while excluding context-only records.
+
+### Fixed
+
+- Use precise UTC epoch bounds for new explicitly date-filtered native searches;
+  preserve legacy saved query/cursor pairs during resume.
+- Batch metric snapshot writes per page while retaining hashes, ordering and
+  per-page checkpoint durability.
+
 ## 1.1.0 — 2026-10-12
 
 - Add bounded `XClientPool`, public login/job configurations, persistent observer

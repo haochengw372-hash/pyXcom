@@ -101,7 +101,7 @@ class PostStore:
             [{"timestamp": now_utc(), **record, **observer_metadata()}],
         )
 
-    def _snapshot(self, post: Post) -> None:
+    def _snapshot(self, post: Post) -> dict | None:
         row = {
             "post_id": post.id,
             "retrieved_at_utc": post.captured_at_utc,
@@ -127,12 +127,12 @@ class PostStore:
                 "bookmark_count",
             )
         ):
-            return
+            return None
         key = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
-        if key not in self._metrics:
-            row["snapshot_id"] = key
-            append_jsonl(self._metrics_path, [row])
-            self._metrics[key] = row
+        if key in self._metrics:
+            return None
+        row["snapshot_id"] = key
+        return row
 
     @property
     def count(self) -> int:
@@ -150,10 +150,18 @@ class PostStore:
         self, posts: list[Post], next_cursor: str | None, *, count_page: bool = True
     ) -> int:
         incoming: dict[str, Post] = {}
+        metrics: dict[str, dict] = {}
         for post in posts:
-            self._snapshot(post)
+            snapshot = self._snapshot(post)
+            if snapshot is not None:
+                metrics.setdefault(snapshot["snapshot_id"], snapshot)
             if post.id not in self._posts and post.id not in incoming:
                 incoming[post.id] = post
+        if metrics:
+            # Persist the page's metric observations before advancing canonical
+            # records or the checkpoint. Failed writes must not update the cache.
+            append_jsonl(self._metrics_path, metrics.values())
+            self._metrics.update(metrics)
         append_jsonl(
             self._internal / "observations.jsonl", (post.to_dict() for post in posts)
         )

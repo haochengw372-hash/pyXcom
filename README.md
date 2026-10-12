@@ -325,6 +325,31 @@ Validation and complete acquisition are separate checks. A consistent partial da
 
 If intact sources have stale derived files, [the recovery guide](docs/recovery.md) describes how to prepare an external generation, verify it and explicitly apply it. Keep independently retained receipts and coordinate other writers before application. Recovery does not reconstruct lost source records, invent a cursor or prove historical login identity.
 
+## Share an ID dataset
+
+Export a verified collection as sorted, deduplicated post IDs without text,
+profiles, private paths, or observing-account metadata:
+
+```python
+from pyxcom import export_post_ids, validate_id_dataset, iter_post_ids
+
+export_post_ids("output/openai", "sharing/openai_ids")
+assert validate_id_dataset("sharing/openai_ids")["valid"]
+ids = list(iter_post_ids("sharing/openai_ids"))
+```
+
+The destination must be new and separate from the collection. Conversation seed
+roots are included; context-only records are excluded. The export does not grant
+a license to underlying X content or establish complete platform coverage. See
+[ID datasets and rehydration](docs/datasets.md).
+
+For the local persistence measurements, see [storage benchmarks](benchmarks/STORAGE_RESULTS.md).
+
+New native searches with explicit `since`/`until` use precise UTC epoch bounds
+alongside the date expression, with local half-open date validation. Existing
+saved queries resume with their original expression and cursor. Use a new output
+directory to collect a legacy query with the corrected date encoding.
+
 ## Command line
 
 The `pyxcom` command exposes the same collection tasks:
