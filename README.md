@@ -392,7 +392,7 @@ These are offline development checks. They do not collect new X data.
 
 Created by **Haocheng Wang, Communication University of China**.
 
-[PykTok](https://github.com/dfreelon/pyktok) inspired the approachable get/save naming and task-by-task examples. pyXcom is an independent implementation and does not depend on PykTok or twikit.
+[PykTok](https://github.com/dfreelon/pyktok) inspired the approachable get/save naming and task-by-task examples. 
 
 ## Citation
 
