@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.0 — 2026-10-13
+
+### Added
+
+- `XClient.save_comment_ancestry()` verifies missing comment parents through bounded,
+  deduplicated exact-ID lookups, using the source observer when bound.
+- Write a separate ancestry supplement with verified seed-relative/platform depths,
+  explicit unresolved statuses, context-only parents and source/output hashes.
+- Preserve original sampling roles, files, cursors and partial status; stop further
+  lookups on rate limits or request errors without rotating accounts.
+
+No new runtime dependencies or changes to existing comment collection defaults.
+
 ## 1.2.1 — 2026-10-13
 
 ### Fixed

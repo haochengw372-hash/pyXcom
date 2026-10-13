@@ -98,6 +98,20 @@ result = client.save_post_comments(
 )
 ```
 
+### Verify missing comment ancestors
+
+```python
+save_comment_ancestry(source_dir: str | Path, output_dir: str | Path, *,
+                      lookup_limit: int = 20) -> dict
+```
+
+Reads a verified saved `post_comments` source and writes a new, separate ancestry
+supplement. Source scopes and sampling roles are immutable. Exact-parent lookups
+are bounded and deduplicated; known source observers must match the current login.
+`lookup_limit=0` makes no network calls. A resolved chain establishes descent from
+the requested seed; it does not establish exhaustive collection. See
+[comment ancestry](comment-ancestry.md) for outputs, depth definitions and failure handling.
+
 The manifest distinguishes queued requests, stalled requests, active warnings,
 and historical warnings. A retry can still return a partial result when the
 platform keeps returning empty pages. CLI: `pyxcom post-comments ID --output-dir

@@ -957,6 +957,24 @@ class XClient(DiscoveryMixin, NetworkMixin):
             )
         )
 
+    def save_comment_ancestry(
+        self,
+        source_dir: str | Path,
+        output_dir: str | Path,
+        *,
+        lookup_limit: int = 20,
+    ) -> dict:
+        """Save a separate, bounded supplement verifying missing comment parents.
+
+        Original collection files and sampling roles are preserved. The cap counts
+        single-post lookup calls; transport retries can make more HTTP attempts.
+        """
+        from .ancestry import save_comment_ancestry
+
+        return save_comment_ancestry(
+            self, source_dir, output_dir, lookup_limit=lookup_limit
+        )
+
     @guarded_collection
     def save_post_comments(
         self,

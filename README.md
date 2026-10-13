@@ -174,6 +174,24 @@ Repeat the same seed, depth, dates and output directory to resume. Raise the com
 
 For a main-post seed, the root enters `posts.csv` and descendants enter `comments.csv`. A reply seed remains in `comments.csv`. `seed_post_id` and `seed_relative_depth` describe the requested branch; platform root, parent and depth fields describe the retained ancestry. Unknown ancestry stays unresolved. `get_post_comments()` and `iter_post_comments()` return descendants without writing a dataset.
 
+When a saved tree contains pending replies with missing parents, you can verify
+their exact parent chains in a separate supplement:
+
+```python
+with XClient(profile="Default") as client:
+    report = client.save_comment_ancestry(
+        "data/conversation", "data/conversation_ancestry", lookup_limit=20,
+    )
+```
+
+This reads a verified `post_comments` collection and looks up missing parent IDs
+using the same observer when the source has a pool identity binding. It writes
+`resolution.csv`, context-only `ancestor_posts.jsonl`, the original pending
+records, raw responses and a hash manifest into a new directory. Source files,
+sampling roles and completeness remain unchanged. The limit counts lookup calls;
+identity checks and transport retries are additional HTTP attempts. See
+[comment ancestry](docs/comment-ancestry.md) for field definitions and unresolved cases.
+
 ### Collect several accounts
 
 One client can collect several target accounts using the same authenticated browser session:
