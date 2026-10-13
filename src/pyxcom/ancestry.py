@@ -6,14 +6,16 @@ import time
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-from ._persistence import append_jsonl, atomic_json, read_jsonl
+from ._persistence import append_jsonl, atomic_json, atomic_text, read_jsonl
 from ._pool_locks import ScopeLock
 from .errors import IntegrityError, ParseError, PyXcomError, RateLimitError
 from .integrity import assess_recovery
 from .models import Post
 from .parse import single_post
+from .provenance import _owner, assert_collection_owner
 from .recovery import _files
 from .transport import now_utc
 
@@ -46,6 +48,74 @@ def _protected(payload: dict) -> bool:
     )
 
 
+def _parent_not_returned(payload: dict) -> bool:
+    """Recognize explicit empty slots/tombstones, not unknown response shapes."""
+    data = payload.get("data")
+    if payload.get("errors") or not isinstance(data, dict) or "tweetResult" not in data:
+        return False
+    slot = data["tweetResult"]
+    if slot is None:
+        return True
+    if not isinstance(slot, dict):
+        return False
+    result = slot.get("result")
+    return (
+        result is None
+        or result == {}
+        or (isinstance(result, dict) and result.get("__typename") == "TweetTombstone")
+    )
+
+
+def _publish_supplement(
+    target: Path,
+    pending: dict,
+    fetched: dict[str, Post],
+    rows: list[dict],
+    raw_responses: dict[str, dict],
+    report: dict,
+) -> dict:
+    """Publish a complete generation; ordinary write failures leave no final target."""
+    assert_collection_owner(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".pyxcom-ancestry-", dir=target.parent) as temporary:
+        staged = Path(temporary)
+        (staged / "raw").mkdir()
+        for name, records in (
+            ("ancestor_posts.jsonl", (p.to_dict() for p in fetched.values())),
+            ("pending_posts.jsonl", pending.values()),
+        ):
+            append_jsonl(staged / name, records)
+        with atomic_text(
+            staged / "resolution.csv", encoding="utf-8-sig", newline=""
+        ) as stream:
+            writer = csv.DictWriter(
+                stream,
+                fieldnames=[
+                    "post_id",
+                    "root_post_id",
+                    "seed_post_id",
+                    "parent_post_id",
+                    "ancestry_status",
+                    "depth",
+                    "seed_relative_depth",
+                    "chain_ids",
+                    "within_requested_bounds",
+                    "blocked_post_id",
+                ],
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+        for identifier, payload in raw_responses.items():
+            atomic_json(staged / "raw" / f"{identifier}.json", payload)
+        report["files_sha256"] = _files(staged)
+        atomic_json(staged / "manifest.json", report)
+        if target.exists():
+            raise FileExistsError("Ancestry supplement already exists")
+        assert_collection_owner(target)
+        staged.rename(target)
+    return report
+
+
 def save_comment_ancestry(
     client: "XClient",
     source_dir: str | Path,
@@ -72,6 +142,7 @@ def save_comment_ancestry(
             stack.enter_context(ScopeLock(scope))
         if target.exists():
             raise FileExistsError("Ancestry supplement already exists")
+        assert_collection_owner(target)
         assessment = assess_recovery(source)
         if not assessment["allowed"] or assessment["record_integrity"] != "verified":
             raise IntegrityError(
@@ -89,13 +160,8 @@ def save_comment_ancestry(
         posts.update({key: Post(**value) for key, value in pending.items()})
         root = str(query["root_post_id"])
         conversation_id = str(conversation.get("conversation_id", root))
-        owner_path = source / ".pyxcom/pool-owner.json"
-        owner = (
-            json.loads(owner_path.read_text(encoding="utf-8"))
-            if owner_path.exists()
-            else {}
-        )
-        expected_observer = owner.get("observer_id")
+        owner = _owner(source)
+        expected_observer = (owner or {}).get("observer_id")
         verified_observer = None
         fetched: dict[str, Post] = {}
         failures: dict[str, str] = {}
@@ -132,7 +198,11 @@ def save_comment_ancestry(
                 try:
                     post = single_post(payload, captured_at_utc=now_utc())
                 except (ParseError, ValueError, TypeError, KeyError, AttributeError):
-                    failures[identifier] = "parent_not_returned"
+                    failures[identifier] = (
+                        "parent_not_returned"
+                        if _parent_not_returned(payload)
+                        else "response_unparsed"
+                    )
                     return None, failures[identifier]
                 if post.id != identifier:
                     failures[identifier] = "identity_conflict"
@@ -177,7 +247,9 @@ def save_comment_ancestry(
             chain = [identifier]
             current = post
             status = "resolved"
+            blocked_id = None
             while current.id != root:
+                blocked_id = current.id
                 if (
                     current.conversation_id != conversation_id
                     or current.reposted_post_id
@@ -185,6 +257,7 @@ def save_comment_ancestry(
                     status = "conversation_conflict"
                     break
                 parent_id = current.in_reply_to_id
+                blocked_id = parent_id or current.id
                 if parent_id is None or (
                     parent_id == conversation_id and conversation_id != root
                 ):
@@ -204,6 +277,7 @@ def save_comment_ancestry(
                     break
                 chain.append(parent_id)
                 current = parent
+                blocked_id = None
             seed_depth = len(chain) - 1 if status == "resolved" else None
             within = None
             if seed_depth is not None:
@@ -224,38 +298,11 @@ def save_comment_ancestry(
                     "seed_relative_depth": seed_depth,
                     "chain_ids": json.dumps(chain),
                     "within_requested_bounds": within,
+                    "blocked_post_id": blocked_id,
                 }
             )
-        if _files(source) != assessment["input_sha256"]:
+        if _files(source) != assessment["input_sha256"] or _owner(source) != owner:
             raise IntegrityError("Source changed during ancestry verification")
-        target.mkdir(parents=True, exist_ok=False)
-        (target / "raw").mkdir()
-        for name, records in (
-            ("ancestor_posts.jsonl", (p.to_dict() for p in fetched.values())),
-            ("pending_posts.jsonl", pending.values()),
-        ):
-            append_jsonl(target / name, records)
-        with (target / "resolution.csv").open(
-            "w", encoding="utf-8-sig", newline=""
-        ) as stream:
-            writer = csv.DictWriter(
-                stream,
-                fieldnames=[
-                    "post_id",
-                    "root_post_id",
-                    "seed_post_id",
-                    "parent_post_id",
-                    "ancestry_status",
-                    "depth",
-                    "seed_relative_depth",
-                    "chain_ids",
-                    "within_requested_bounds",
-                ],
-            )
-            writer.writeheader()
-            writer.writerows(rows)
-        for identifier, payload in raw_responses.items():
-            atomic_json(target / "raw" / f"{identifier}.json", payload)
         counts = {
             status: sum(r["ancestry_status"] == status for r in rows)
             for status in sorted({r["ancestry_status"] for r in rows})
@@ -280,7 +327,7 @@ def save_comment_ancestry(
             "context_records": len(fetched),
             "collection_complete": assessment["complete"],
             "source_collection_reason": assessment["reason"],
-            "files_sha256": _files(target),
         }
-        atomic_json(target / "manifest.json", report)
-        return report
+        return _publish_supplement(
+            target, pending, fetched, rows, raw_responses, report
+        )

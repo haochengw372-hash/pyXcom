@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.1 — 2026-10-13
+
+### Fixed
+
+- Distinguish malformed or unparseable parent responses (`response_unparsed`)
+  from recognized empty results and tombstones (`parent_not_returned`).
+- Honor inherited source observer bindings and reject malformed markers by reusing
+  the package's ownership reader; check ownership again before publication.
+- Reject supplement destinations owned by another pool before network requests,
+  including inherited ownership, and check again before publication.
+- Publish ancestry output as one staged generation. Ordinary write failures leave
+  no partial final directory blocking retries.
+
+### Added
+
+- `blocked_post_id` identifies the actual point of failure along a parent chain,
+  while preserving the original `parent_post_id`.
+
 ## 1.3.0 — 2026-10-13
 
 ### Added

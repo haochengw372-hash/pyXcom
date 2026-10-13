@@ -20,6 +20,8 @@ The source must pass retained-record and checkpoint integrity verification and
 must be a `post_comments` collection. Both scopes are locked; overlapping paths,
 existing destinations and symlink source contents are rejected. Source files,
 cursors, roles, counts and partial status remain unchanged.
+Destinations inside another pool's owned scope are rejected before network requests
+and checked again before publication; an idle pool still owns its persisted scope.
 
 ## Lookup rules
 
@@ -30,8 +32,10 @@ resolved only when it reaches the exact requested seed, without a cycle. Other
 branches of a reply-seeded conversation are not admitted.
 
 Before the first lookup, the client verifies its current identity. If the source
-has a pool observer binding, that identity must match; a mismatch raises before
-parent content is requested. Older unbound sources remain explicitly unbound in
+has a pool observer binding, including one inherited from an ancestor directory,
+that identity must match; a mismatch raises before parent content is requested.
+Malformed ownership markers are rejected before identity or parent requests, and
+the marker is checked again before publication. Older unbound sources remain explicitly unbound in
 the manifest. No observer is inferred retroactively and no account rotation occurs.
 
 `lookup_limit` is a nonnegative integer limiting single-post lookup calls, not
@@ -52,6 +56,9 @@ delay; a rate limit or request error stops further parent lookups in that run.
 `seed_post_id` is the requested collection seed; `root_post_id` is the platform
 conversation root. `chain_ids` lists verified retained IDs from the pending record
 back toward the seed; an unresolved chain does not include the unreturned parent.
+`blocked_post_id` identifies the first post where that chain could not be verified,
+including a deeper missing parent after the original parent was fetched. It is
+blank for resolved chains; `parent_post_id` always preserves the original reply link.
 `seed_relative_depth` counts links to the seed and is blank until that chain is
 resolved. `depth` counts links to the platform root and also requires retained
 evidence between a reply seed and that root; otherwise it stays blank. This method
@@ -64,13 +71,18 @@ records never alter the original `posts.csv` or `comments.csv`.
 
 Statuses include `resolved`, `lookup_budget`, `parent_not_returned`, `rate_limited`,
 `request_error`, `identity_conflict`, `conversation_conflict`, `outside_seed_branch`,
-`cycle` and `protected_parent`. A successful response without a parseable parent
-is `parent_not_returned`; that does not establish deletion, protection or absence
-on the platform. Explicitly protected parent content is not retained or archived.
+`cycle`, `response_unparsed` and `protected_parent`. A recognized empty result or
+tombstone is `parent_not_returned`; that does not establish deletion, protection
+or absence on the platform. A changed response shape or invalid returned post is
+`response_unparsed`, with raw evidence retained for diagnosis. Explicitly protected
+parent content is not retained or archived.
 
 Each invocation uses a new output directory. There is no supplement resume or
-automatic merging into the source. Output is published after traversal; a process
-termination before publication can lose that run's in-memory supplement. Retain
+automatic merging into the source. After traversal, all files are written in a
+temporary sibling directory, then renamed to the requested destination together.
+Ordinary write failures remove staging and leave the destination free for retry.
+A process termination before publication can lose that run's in-memory supplement;
+an abrupt kill can also leave an unpublished hidden staging directory. Retain
 the original source and compare dated supplements explicitly. The manifest's
 `collection_complete` and `source_collection_reason` copy the original collection's
 status, even if every pending chain has now been resolved.
@@ -92,3 +104,9 @@ Eighteen focused offline regression tests cover exact chains, shared parents,
 reply-seed boundaries, cycles, budgets, source integrity, identity mismatch,
 malformed responses and protected content. The complete suite contained 454
 passing tests at this release.
+
+The 1.3.1 review expanded this to 25 focused tests and 461 complete-suite tests.
+It also replayed the three previously archived lookup responses offline, preserving
+the two resolved chains and one empty parent result. No new network collection
+was used for that replay. Injected JSONL, raw-response and manifest write failures
+each left no final directory and allowed a retry to the same destination.

@@ -50,4 +50,4 @@ __all__ = [
     "validate_collection",
     "validate_network_collection",
 ]
-__version__ = "1.3.0"
+__version__ = "1.3.1"

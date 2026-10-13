@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from test_comments import ROOT, A, B, C, client, page, tweet
 from pyxcom import IntegrityError, RateLimitError
@@ -12,6 +12,15 @@ from pyxcom.errors import ParseError
 
 def lookup_payload(post):
     return {"data": {"tweetResult": {"result": post}}}
+
+
+def owner_marker(observer_id, source):
+    return {
+        "observer_id": observer_id,
+        "login_id": "test_login",
+        "job_id": "test_job",
+        "pool_state_dir": str(source.parent / "pool"),
+    }
 
 
 class AncestryTests(unittest.TestCase):
@@ -117,13 +126,53 @@ class AncestryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             c, source = self.make_source(tmp, [tweet(B, A)])
             (source / ".pyxcom/pool-owner.json").write_text(
-                json.dumps({"observer_id": "200"})
+                json.dumps(owner_marker("200", source))
             )
             c.check_login_identity = Mock(return_value="100")
             c.get_raw_post = Mock()
             with self.assertRaises(ValueError):
                 c.save_comment_ancestry(source, Path(tmp) / "resolved")
             c.get_raw_post.assert_not_called()
+            c.check_login_identity.assert_called_once()
+
+    def test_inherited_observer_mismatch_rejects_before_lookup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c, source = self.make_source(Path(tmp) / "owned", [tweet(B, A)])
+            marker = source.parent / ".pyxcom/pool-owner.json"
+            marker.parent.mkdir()
+            marker.write_text(json.dumps(owner_marker("200", source)))
+            c.check_login_identity = Mock(return_value="100")
+            c.get_raw_post = Mock()
+            with self.assertRaises(ValueError):
+                c.save_comment_ancestry(source, Path(tmp) / "resolved")
+            c.get_raw_post.assert_not_called()
+            self.assertFalse((Path(tmp) / "resolved").exists())
+            c.check_login_identity.assert_called_once()
+
+    def test_other_pool_owned_destination_rejects_before_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c, source = self.make_source(tmp, [tweet(B, A)])
+            other = Path(tmp) / "other_pool_output"
+            marker = other / ".pyxcom/pool-owner.json"
+            marker.parent.mkdir(parents=True)
+            marker.write_text(json.dumps(owner_marker("200", other)))
+            before = self.files(other)
+            c.check_login_identity = Mock(return_value="100")
+            c.get_raw_post = Mock(return_value=lookup_payload(tweet(A, ROOT)))
+            with self.assertRaises(IntegrityError):
+                c.save_comment_ancestry(source, other / "supplement")
+            c.check_login_identity.assert_not_called()
+            self.assertEqual(self.files(other), before)
+
+    def test_malformed_owner_marker_rejects_before_identity_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c, source = self.make_source(tmp, [tweet(B, A)])
+            (source / ".pyxcom/pool-owner.json").write_text('{"observer_id": null}')
+            c.check_login_identity = Mock(return_value="100")
+            c.get_raw_post = Mock(return_value={"data": {"tweetResult": {}}})
+            with self.assertRaises(IntegrityError):
+                c.save_comment_ancestry(source, Path(tmp) / "resolved")
+            c.check_login_identity.assert_not_called()
 
     def test_shared_missing_parent_is_fetched_once(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,8 +271,85 @@ class AncestryTests(unittest.TestCase):
             target = Path(tmp) / "resolved"
             report = c.save_comment_ancestry(source, target)
             self.assertEqual(report["resolved_records"], 1)
-            self.assertEqual(report["status_counts"]["parent_not_returned"], 1)
+            self.assertEqual(report["status_counts"]["response_unparsed"], 1)
             self.assertEqual(report["context_records"], 1)
+
+    def test_invalid_returned_parent_is_parse_failure_not_absence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c, source = self.make_source(tmp, [tweet(B, A)])
+            parent = tweet(A, ROOT)
+            del parent["legacy"]["created_at"]
+            c.check_login_identity = Mock(return_value="100")
+            c.get_raw_post = Mock(return_value=lookup_payload(parent))
+            target = Path(tmp) / "resolved"
+            report = c.save_comment_ancestry(source, target)
+            self.assertEqual(
+                self.rows(target)[0]["ancestry_status"], "response_unparsed"
+            )
+            self.assertEqual(report["context_records"], 0)
+            self.assertTrue((target / "raw" / f"{A}.json").exists())
+
+    def test_tombstone_is_unreturned_not_unparsed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c, source = self.make_source(tmp, [tweet(B, A)])
+            c.check_login_identity = Mock(return_value="100")
+            c.get_raw_post = Mock(
+                return_value=lookup_payload({"__typename": "TweetTombstone"})
+            )
+            target = Path(tmp) / "resolved"
+            c.save_comment_ancestry(source, target)
+            self.assertEqual(
+                self.rows(target)[0]["ancestry_status"], "parent_not_returned"
+            )
+
+    def test_deeper_blocked_id_is_distinct_from_original_parent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c, source = self.make_source(tmp, [tweet(C, B)])
+            c.check_login_identity = Mock(return_value="100")
+            c.get_raw_post = Mock(
+                side_effect=[lookup_payload(tweet(B, A)), {"data": {"tweetResult": {}}}]
+            )
+            target = Path(tmp) / "resolved"
+            c.save_comment_ancestry(source, target)
+            row = self.rows(target)[0]
+            self.assertEqual(row["parent_post_id"], B)
+            self.assertEqual(row["blocked_post_id"], A)
+            self.assertEqual(row["ancestry_status"], "parent_not_returned")
+            self.assertEqual(json.loads(row["chain_ids"]), [C, B])
+
+    def test_publication_failure_leaves_no_partial_target_and_can_retry(self):
+        from pyxcom._persistence import atomic_json as write_json
+
+        for phase in ("jsonl", "raw", "manifest"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp:
+                c, source = self.make_source(tmp, [tweet(B, A)])
+                c.check_login_identity = Mock(return_value="100")
+                c.get_raw_post = Mock(return_value=lookup_payload(tweet(A, ROOT)))
+                target = Path(tmp) / "resolved"
+                before = self.files(source)
+
+                def fail_write(path, value):
+                    if (phase == "raw" and path.parent.name == "raw") or (
+                        phase == "manifest" and path.name == "manifest.json"
+                    ):
+                        raise OSError("injected write failure")
+                    write_json(path, value)
+
+                failure = (
+                    patch(
+                        "pyxcom.ancestry.append_jsonl",
+                        side_effect=OSError("injected write failure"),
+                    )
+                    if phase == "jsonl"
+                    else patch("pyxcom.ancestry.atomic_json", side_effect=fail_write)
+                )
+                with failure, self.assertRaises(OSError):
+                    c.save_comment_ancestry(source, target)
+                self.assertFalse(target.exists())
+                self.assertEqual(list(target.parent.glob(".pyxcom-ancestry-*")), [])
+                self.assertEqual(self.files(source), before)
+                report = c.save_comment_ancestry(source, target)
+                self.assertEqual(report["resolved_records"], 1)
 
     def test_paths_and_corruption_reject_before_network(self):
         with tempfile.TemporaryDirectory() as tmp:
