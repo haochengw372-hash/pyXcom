@@ -1,11 +1,14 @@
 """Bounded, resumable traversal of public replies to an X post or reply seed."""
 
 import time
+import json
+import hashlib
 from dataclasses import replace
 from datetime import date
 from typing import TYPE_CHECKING, Iterator
 
-from .errors import ParseError, RateLimitError
+from .errors import IntegrityError, ParseError, RateLimitError
+from ._persistence import read_jsonl
 from .models import Post
 from .parse import _walk, parse_post, parse_profile
 from .transport import now_utc
@@ -80,6 +83,71 @@ def parse_conversation(data: dict) -> tuple[list[Post], list[str], dict]:
     return list(posts.values()), list(dict.fromkeys(cursors)), profiles
 
 
+def restore_archived_stalls(store) -> None:
+    """Recover legacy dropped frontiers from exact, verified response artifacts.
+
+    Called only for explicit retry. Missing evidence remains an unresolved stop;
+    no cursor is guessed and no existing post or raw artifact is rewritten.
+    """
+    state = store.state.get("conversation", {})
+    if (
+        state.get("stalled_queue")
+        or state.get("legacy_stall_recovery") is not None
+        or "empty_page_limit" not in state.get("pagination_warnings", [])
+    ):
+        return
+    affected = {
+        focal for focal, count in state.get("empty_pages", {}).items() if count >= 2
+    }
+    latest = {}
+    last_visited = {task[0]: task for task in state.get("visited", [])}
+    log_path = store.output_dir / ".pyxcom" / "collection_log.jsonl"
+    for record in read_jsonl(log_path) if log_path.exists() else ():
+        if record.get("operation") == "TweetDetail":
+            focal = record.get("variables", {}).get("focalTweetId")
+            request_cursor = record.get("variables", {}).get("cursor")
+            if focal in affected and last_visited.get(focal) == [focal, request_cursor]:
+                latest[focal] = record
+    recovered: list[dict] = []
+    unresolved: list[str] = []
+    for focal in sorted(affected):
+        archived = latest.get(focal)
+        if (
+            not archived
+            or not archived.get("raw_path")
+            or not archived.get("raw_sha256")
+        ):
+            unresolved.append(focal)
+            continue
+        path = (store.output_dir / archived["raw_path"]).resolve()
+        if not path.is_relative_to((store.output_dir / ".pyxcom" / "raw").resolve()):
+            raise IntegrityError(
+                "Comment retry archive must remain inside the raw directory"
+            )
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != archived["raw_sha256"]:
+            raise IntegrityError("Comment retry archive changed")
+        _, cursors, _ = parse_conversation(json.loads(raw))
+        tasks = [
+            [focal, cursor]
+            for cursor in cursors
+            if [focal, cursor] not in state.get("visited", [])
+            and [focal, cursor] not in state.get("queue", [])
+        ]
+        if not tasks:
+            unresolved.append(focal)
+        recovered.extend(
+            {"focal_id": task[0], "cursor": task[1], "reason": "empty_page_limit"}
+            for task in tasks
+        )
+    state["stalled_queue"] = recovered
+    state["unrecoverable_stalled_focals"] = unresolved
+    state["legacy_stall_recovery"] = {
+        "restored": len(recovered),
+        "unresolved": len(unresolved),
+    }
+
+
 class CommentTraversal:
     def __init__(
         self,
@@ -93,7 +161,10 @@ class CommentTraversal:
         state: dict | None = None,
         since: str | None = None,
         until: str | None = None,
+        retry_stalled: bool = False,
     ):
+        if not isinstance(retry_stalled, bool):
+            raise ValueError("retry_stalled must be boolean")
         if max_depth is None:
             raise ValueError("max_depth must be a positive integer")
         for name, value in (
@@ -138,6 +209,28 @@ class CommentTraversal:
             ],
         )
         self.state.setdefault("excluded_ids", [])
+        self.state.setdefault("stalled_queue", [])
+        self.state.setdefault("pagination_warning_history", [])
+        if retry_stalled and self.state["stalled_queue"]:
+            for task in self.state["stalled_queue"]:
+                if task["reason"] != "empty_page_limit":
+                    continue
+                follow = [task["focal_id"], task["cursor"]]
+                if follow not in self.state["queue"]:
+                    self.state["queue"].append(follow)
+                self.state["empty_pages"][task["focal_id"]] = 0
+                self.state["pagination_warning_history"].append(task["reason"])
+            self.state["stalled_queue"] = [
+                task
+                for task in self.state["stalled_queue"]
+                if task["reason"] != "empty_page_limit"
+            ]
+            if not self.state.get("unrecoverable_stalled_focals"):
+                self.state["pagination_warnings"] = [
+                    reason
+                    for reason in self.state["pagination_warnings"]
+                    if reason != "empty_page_limit"
+                ]
         self.latest_payload: dict | None = None
         self.latest_request: dict | None = None
         self.latest_response_number = 0
@@ -252,7 +345,11 @@ class CommentTraversal:
             if not self.state["queue"]:
                 unresolved = len(self.state["pending"])
                 self.state["unresolved_count"] = unresolved
-                self.complete = not unresolved and not self.state["pagination_warnings"]
+                self.complete = (
+                    not unresolved
+                    and not self.state["pagination_warnings"]
+                    and not self.state["stalled_queue"]
+                )
                 self.reason = (
                     "visible_source_end" if self.complete else "partial_conversation"
                 )
@@ -300,6 +397,13 @@ class CommentTraversal:
                     self.state["pagination_warnings"].append("repeated_cursor")
                 elif self.state["empty_pages"][focal] >= 2:
                     self.state["pagination_warnings"].append("empty_page_limit")
+                    paused = {
+                        "focal_id": focal,
+                        "cursor": next_cursor,
+                        "reason": "empty_page_limit",
+                    }
+                    if paused not in self.state["stalled_queue"]:
+                        self.state["stalled_queue"].append(paused)
                 elif follow not in self.state["queue"]:
                     self.state["queue"].append(follow)
             self.pages_fetched += 1

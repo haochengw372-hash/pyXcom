@@ -424,6 +424,7 @@ class XClientPool:
             "search_query",
             "post_quotes",
             "user_reposts",
+            "post_comments",
         }:
             raise ValueError("This collector does not support retry_stalled")
         job.update(status="pending", retry_stalled=retry_stalled)

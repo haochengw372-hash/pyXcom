@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.1 — 2026-10-13
+
+### Fixed
+
+- Retain comment cursors paused by the empty-page guard and support explicit
+  `retry_stalled=True` through the saver, CLI and pool resume.
+- Recover older discarded cursors only from hash-verified archives bound to the
+  last committed focal/cursor request, including after an ordinary resume.
+- Keep historical pagination warnings while reporting still-stalled and
+  unrecoverable branches separately; bounded retries may remain partial.
+
 ## 1.2.0 — 2026-10-12
 
 ### Added

@@ -251,6 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Collect replies below a post or reply, including nested replies",
     )
     comments.add_argument("post_id_or_url")
+    comments.add_argument("--retry-stalled", action="store_true", help="Explicitly retry saved comment cursors paused by empty-page guard")
     comments.add_argument("--max-depth", type=_depth, default=2)
     comments.add_argument("--max-comments", type=_budget, default=100)
     comments.add_argument("--max-pages", type=_budget, default=20)
@@ -576,6 +577,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_pages=args.max_pages,
                     since=args.since,
                     until=args.until,
+                    **({"retry_stalled": True} if args.retry_stalled else {}),
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))
             elif args.command in ("search-query", "post-quotes", "user-reposts"):

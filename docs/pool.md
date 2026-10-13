@@ -83,7 +83,7 @@ X's quota implementation. Requests already in flight cannot be recalled.
 
 Reopen the same `state_dir` with the same login IDs and call `run` again. Re-adding
 an identical job is harmless; changing its query, scope, or observer is rejected.
-Use `resume_job(job_id)` for a paused job. Explicit discovery-stall retries use
+Use `resume_job(job_id)` for a paused job. Explicit discovery or comment empty-page retries use
 `resume_job(job_id, retry_stalled=True)` where the underlying saver supports it.
 
 Adopting existing output requires both a pinned `login_id` and

@@ -968,9 +968,10 @@ class XClient(DiscoveryMixin, NetworkMixin):
         max_pages: int | None = 20,
         since: str | None = None,
         until: str | None = None,
+        retry_stalled: bool = False,
     ) -> CollectionResult:
         """Save a root post, its reply tree and observed author profiles; resume safely."""
-        from .comments import CommentTraversal
+        from .comments import CommentTraversal, restore_archived_stalls
 
         root_id = _post_id(post_id_or_url)
         # Validate bounds before creating or migrating output.
@@ -982,6 +983,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             max_pages=max_pages,
             since=since,
             until=until,
+            retry_stalled=retry_stalled,
         )
         store = PostStore(
             output_dir,
@@ -994,6 +996,8 @@ class XClient(DiscoveryMixin, NetworkMixin):
         )
         if store.complete:
             return store.finish(complete=True, reason=store.state["reason"])
+        if retry_stalled:
+            restore_archived_stalls(store)
         traversal = CommentTraversal(
             self,
             root_id,
@@ -1004,6 +1008,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             until=until,
             records=store._posts,
             state=store.state.setdefault("conversation", {}),
+            retry_stalled=retry_stalled,
         )
 
         def save_profiles():

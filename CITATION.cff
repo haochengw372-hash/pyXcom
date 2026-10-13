@@ -6,8 +6,8 @@ authors:
   - family-names: Wang
     given-names: Haocheng
     affiliation: Communication University of China
-version: 1.2.0
-date-released: 2026-10-12
+version: 1.2.1
+date-released: 2026-10-13
 license: Apache-2.0
 repository-code: "https://github.com/haochengw372-hash/pyXcom"
 url: "https://github.com/haochengw372-hash/pyXcom"

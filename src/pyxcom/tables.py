@@ -184,6 +184,7 @@ def _depths(records: dict[str, Post]) -> dict[str, tuple[int | None, str]]:
 def export_tables(output_dir: str | Path) -> dict:
     """Rebuild verified public tables under an exclusive collection scope lock."""
     from .provenance import collection_write_guard
+
     with collection_write_guard(output_dir):
         return _export_tables_verified(output_dir)
 
@@ -452,6 +453,11 @@ def _export_tables_unchecked(output_dir: str | Path) -> dict:
         manifest["comment_collection"] = {
             "max_depth": manifest["query"]["max_depth"],
             "pending_requests": len(state.get("queue", [])),
+            "stalled_requests": len(state.get("stalled_queue", [])),
+            "unrecoverable_stalled_focals": len(
+                state.get("unrecoverable_stalled_focals", [])
+            ),
+            "pagination_warning_history": state.get("pagination_warning_history", []),
             "unresolved_or_deferred_records": len(state.get("pending", {})),
             "pagination_warnings": sorted(set(state.get("pagination_warnings", []))),
             "depth_counts": {

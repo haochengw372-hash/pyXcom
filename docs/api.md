@@ -1,4 +1,4 @@
-# Public API — pyXcom 1.2.0
+# Public API — pyXcom 1.2.1
 
 The native discovery and network methods have passed offline tests and bounded authenticated live endpoint tests. These tests verify the exercised acquisition paths, not complete historical or network coverage.
 
@@ -80,6 +80,28 @@ These methods expand descendants of the seed from all visible authors, including
 Traversal depth is relative to the seed (direct replies=1), recorded as `seed_post_id` and `seed_relative_depth`. Actual platform `root_post_id`, `parent_post_id` and `depth` remain separate; missing ancestors can leave actual `depth` unresolved. UTC `since`/`until` filter returned descendants while preserving traversal context. Comment cap is exact and cumulative per dataset; page cap applies to each call. A rate-limited save preserves its queue with `complete=false`; memory/iterator methods raise `RateLimitError`. Network/parse failures save a partial checkpoint and raise. Repeating a save with larger comment/page budgets resumes it; changing seed/depth/date scope requires a separate dataset. Completion only means visible traversal within the requested depth ended, not an exhaustive historical thread. CLI comment/page caps accept `all` for Python `None`; depth must remain a positive integer.
 
 For offline validation of `post_comments`, UTC date scope applies to analysis descendants, while the seed and explicitly marked context can lie outside it. These retained records still participate in identifier, relationship and artifact-integrity checks. The exemption does not apply to other collection types; a descendant missing `observation_role` is treated as analysis for this date check.
+
+### Retry a paused comment branch
+
+`save_post_comments(..., retry_stalled=True)` explicitly requeues cursors saved
+by the empty-page guard. Ordinary resume keeps these branches paused. Repeated
+cursor warnings and unresolved ancestors are still reported as partial.
+
+For older collections, an empty-page cursor is recovered only from a hash-checked
+raw response whose focal ID and request cursor match the last committed request.
+Missing or mismatched evidence remains unresolved; no cursor or tree depth is guessed.
+
+```python
+result = client.save_post_comments(
+    post_id, output_dir, max_depth=3, max_comments=100,
+    max_pages=2, retry_stalled=True,
+)
+```
+
+The manifest distinguishes queued requests, stalled requests, active warnings,
+and historical warnings. A retry can still return a partial result when the
+platform keeps returning empty pages. CLI: `pyxcom post-comments ID --output-dir
+DIR --retry-stalled`. Pool: `resume_job(job_id, retry_stalled=True)`.
 
 ## Keyword search
 
