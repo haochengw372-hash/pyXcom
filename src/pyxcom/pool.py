@@ -37,7 +37,7 @@ _OPTIONS = {
     "user_posts": {"since", "until", "limit"},
     "user_replies": {"since", "until", "limit"},
     "user_reposts": {"since", "until", "limit"},
-    "post_comments": {"since", "until", "max_depth", "max_comments"},
+    "post_comments": {"since", "until", "max_depth", "max_comments", "comment_workers"},
     "followers": {"limit", "snapshot_id"},
     "following": {"limit", "snapshot_id"},
     "post_reposters": {"limit", "snapshot_id"},
@@ -285,7 +285,11 @@ class XClientPool:
             raise ValueError("existing_observer_id must be a public numeric user ID")
         options = dict(job.options)
         for key, value in options.items():
-            if key in {"limit", "max_comments", "max_depth"}:
+            if key == "comment_workers":
+                from ._comment_requests import validate_comment_workers
+
+                validate_comment_workers(value)
+            elif key in {"limit", "max_comments", "max_depth"}:
                 if value is not None and (
                     isinstance(value, bool) or not isinstance(value, int) or value < 1
                 ):
@@ -567,17 +571,20 @@ class XClientPool:
         requests = []
         old_gate = getattr(transport, "_request_gate", None)
         old_observer = getattr(transport, "_request_observer", None)
+        request_lock = Lock()
+        event_lock = Lock()
 
         def gate(operation):
-            if old_gate:
-                old_gate(operation)
-            delay = float(
-                self._client_options.get("delay", getattr(client, "delay", 1.0))
-            )
-            remaining = self._next_request.get(owner, 0) - time.monotonic()
-            if remaining > 0:
-                time.sleep(remaining)
-            self._next_request[owner] = time.monotonic() + delay
+            with request_lock:
+                if old_gate:
+                    old_gate(operation)
+                delay = float(
+                    self._client_options.get("delay", getattr(client, "delay", 1.0))
+                )
+                remaining = self._next_request.get(owner, 0) - time.monotonic()
+                if remaining > 0:
+                    time.sleep(remaining)
+                self._next_request[owner] = time.monotonic() + delay
 
         def observe(metadata):
             # Do not store response text, request variables, URLs or headers.
@@ -595,9 +602,10 @@ class XClientPool:
                 value = metadata.get(key)
                 if value is None or isinstance(value, (str, int, float, bool)):
                     safe[key] = value
-            requests.append(tuple(safe.items()))
-            if old_observer:
-                old_observer(metadata)
+            with event_lock:
+                requests.append(tuple(safe.items()))
+                if old_observer:
+                    old_observer(metadata)
 
         if transport is not None:
             transport.last_error = None
@@ -657,6 +665,9 @@ class XClientPool:
                 metadata.update(getattr(transport, "last_error", None) or {})
         except Exception as exc:
             error_type = type(exc).__name__
+            last_error = getattr(transport, "last_error", None)
+            if isinstance(last_error, dict):
+                metadata.update(last_error)
             for key in ("operation", "status_code", "reset_at", "error_codes"):
                 value = getattr(exc, key, None)
                 if value is not None:
@@ -699,6 +710,7 @@ class XClientPool:
             error == "RateLimitError"
             or reason == "rate_limited"
             or metadata.get("status_code") == 429
+            or 88 in metadata.get("error_codes", ())
         ):
             self._limit(owner, job, metadata.get("operation"), metadata.get("reset_at"))
         elif auth or error == "identity_unavailable":

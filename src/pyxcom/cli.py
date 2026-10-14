@@ -255,6 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     comments.add_argument("--max-depth", type=_depth, default=2)
     comments.add_argument("--max-comments", type=_budget, default=100)
     comments.add_argument("--max-pages", type=_budget, default=20)
+    comments.add_argument("--comment-workers", type=_depth, choices=range(1, 9), default=1, help="Concurrent branches within one post (1-8); results commit in order")
     comments.add_argument("--since", help="Inclusive UTC date YYYY-MM-DD")
     comments.add_argument("--until", help="Exclusive UTC date YYYY-MM-DD")
     comments.add_argument(
@@ -411,7 +412,7 @@ def _load_pool_config(path: Path) -> dict:
         "user_posts": date_options,
         "user_replies": date_options,
         "user_reposts": date_options,
-        "post_comments": {"since", "until", "max_depth", "max_comments"},
+        "post_comments": {"since", "until", "max_depth", "max_comments", "comment_workers"},
         "followers": {"limit", "snapshot_id"},
         "following": {"limit", "snapshot_id"},
         "post_reposters": {"limit", "snapshot_id"},
@@ -577,6 +578,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_pages=args.max_pages,
                     since=args.since,
                     until=args.until,
+                    **({"comment_workers": args.comment_workers} if args.comment_workers != 1 else {}),
                     **({"retry_stalled": True} if args.retry_stalled else {}),
                 )
                 print(json.dumps(result.to_dict(), ensure_ascii=False))

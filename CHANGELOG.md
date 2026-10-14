@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0 — 2026-10-14
+
+### Added
+
+- Opt-in `comment_workers=1..8` on comment iter/get/save, CLI and pool job options.
+  Independent branch reads overlap while one coordinator commits FIFO.
+- Retain successful uncommitted read-ahead as hash-verified raw artifacts for
+  capped, failed or interrupted collections, including later serial resume.
+- Shared HTTP-attempt pacing, same-focal in-flight exclusion and joined worker
+  shutdown; preserve observer ownership, exact comment caps and page budgets.
+- A matched branch benchmark checking IDs, edges, depths, queue order, request
+  workload and collection integrity across 1/2/4 workers.
+
+Default traversal remains serial. No new runtime dependencies.
+
 ## 1.3.1 — 2026-10-13
 
 ### Fixed

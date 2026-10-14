@@ -64,18 +64,27 @@ For checkpoints without timeline counters, the package replays the complete reta
 iter_post_comments(post_id_or_url: str, *, max_depth: int = 2,
                    max_comments: int | None = 100,
                    max_pages: int | None = 20,
-                   since: str | None = None, until: str | None = None) -> Iterator[Post]
+                   since: str | None = None, until: str | None = None,
+                   comment_workers: int = 1) -> Iterator[Post]
 get_post_comments(post_id_or_url: str, *, max_depth: int = 2,
                   max_comments: int | None = 100,
                   max_pages: int | None = 20,
-                  since: str | None = None, until: str | None = None) -> list[Post]
+                  since: str | None = None, until: str | None = None,
+                  comment_workers: int = 1) -> list[Post]
 save_post_comments(post_id_or_url: str, output_dir: str | Path, *,
                    max_depth: int = 2, max_comments: int | None = 100,
                    max_pages: int | None = 20,
-                   since: str | None = None, until: str | None = None) -> CollectionResult
+                   since: str | None = None, until: str | None = None,
+                   retry_stalled: bool = False, comment_workers: int = 1) -> CollectionResult
 ```
 
 These methods expand descendants of the seed from all visible authors, including when the seed itself is a reply. They differ from `*_user_replies`, which fetch only one account's authored replies. `get` and `iter` return descendants only; `save` preserves the seed in its proper main/comment table, profiles in `users.csv`, comments in `comments.csv`, and private traversal state for resume. Ancestor context is retained in `context_posts.csv` and is not counted as descendants.
+
+`comment_workers=2` or `4` enables bounded reads across independent branches within
+one conversation (range 1–8, default 1). Results commit in queue order; cached
+uncommitted responses are verified against raw archives on resume. Worker count
+can change between calls without changing the saved sampling query. See
+[branch concurrency](comment-concurrency.md) for cap and pacing semantics.
 
 Traversal depth is relative to the seed (direct replies=1), recorded as `seed_post_id` and `seed_relative_depth`. Actual platform `root_post_id`, `parent_post_id` and `depth` remain separate; missing ancestors can leave actual `depth` unresolved. UTC `since`/`until` filter returned descendants while preserving traversal context. Comment cap is exact and cumulative per dataset; page cap applies to each call. A rate-limited save preserves its queue with `complete=false`; memory/iterator methods raise `RateLimitError`. Network/parse failures save a partial checkpoint and raise. Repeating a save with larger comment/page budgets resumes it; changing seed/depth/date scope requires a separate dataset. Completion only means visible traversal within the requested depth ended, not an exhaustive historical thread. CLI comment/page caps accept `all` for Python `None`; depth must remain a positive integer.
 

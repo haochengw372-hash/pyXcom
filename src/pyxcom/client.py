@@ -7,6 +7,7 @@ import time
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from contextlib import closing
 from typing import Callable, Iterator
 
 from ._persistence import read_jsonl
@@ -910,6 +911,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
         max_pages: int | None = 20,
         since: str | None = None,
         until: str | None = None,
+        comment_workers: int = 1,
     ) -> Iterator[Post]:
         """Stream other-user and self replies, bounded by depth and total comments."""
         from .comments import CommentTraversal
@@ -922,13 +924,15 @@ class XClient(DiscoveryMixin, NetworkMixin):
             max_pages=max_pages,
             since=since,
             until=until,
+            comment_workers=comment_workers,
         )
-        for page in traversal.pages():
-            yield from (
-                post
-                for post in page
-                if post.in_reply_to_id and post.observation_role == "analysis"
-            )
+        with closing(traversal.pages()) as pages:
+            for page in pages:
+                yield from (
+                    post
+                    for post in page
+                    if post.in_reply_to_id and post.observation_role == "analysis"
+                )
         if traversal.reason == "rate_limited":
             raise RateLimitError(
                 "X rate-limited comment collection",
@@ -944,6 +948,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
         max_pages: int | None = 20,
         since: str | None = None,
         until: str | None = None,
+        comment_workers: int = 1,
     ) -> list[Post]:
         """Return observed replies to one main post, including multiple levels."""
         return list(
@@ -954,6 +959,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
                 max_pages=max_pages,
                 since=since,
                 until=until,
+                comment_workers=comment_workers,
             )
         )
 
@@ -987,9 +993,10 @@ class XClient(DiscoveryMixin, NetworkMixin):
         since: str | None = None,
         until: str | None = None,
         retry_stalled: bool = False,
+        comment_workers: int = 1,
     ) -> CollectionResult:
         """Save a root post, its reply tree and observed author profiles; resume safely."""
-        from .comments import CommentTraversal, restore_archived_stalls
+        from .comments import CommentTraversal, restore_archived_stalls, prefetch_callbacks
 
         root_id = _post_id(post_id_or_url)
         # Validate bounds before creating or migrating output.
@@ -1002,6 +1009,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             since=since,
             until=until,
             retry_stalled=retry_stalled,
+            comment_workers=comment_workers,
         )
         store = PostStore(
             output_dir,
@@ -1016,6 +1024,7 @@ class XClient(DiscoveryMixin, NetworkMixin):
             return store.finish(complete=True, reason=store.state["reason"])
         if retry_stalled:
             restore_archived_stalls(store)
+        retained, retain = prefetch_callbacks(store)
         traversal = CommentTraversal(
             self,
             root_id,
@@ -1024,9 +1033,11 @@ class XClient(DiscoveryMixin, NetworkMixin):
             max_pages=max_pages,
             since=since,
             until=until,
+            retained=retained, retain=retain,
             records=store._posts,
             state=store.state.setdefault("conversation", {}),
             retry_stalled=retry_stalled,
+            comment_workers=comment_workers,
         )
 
         def save_profiles():
@@ -1040,21 +1051,22 @@ class XClient(DiscoveryMixin, NetworkMixin):
 
         archived_response_number = 0
         try:
-            for page in traversal.pages():
-                if traversal.latest_response_number > archived_response_number:
-                    assert (
-                        traversal.latest_payload is not None
-                        and traversal.latest_request is not None
-                    )
-                    store.archive_response(
-                        traversal.latest_payload,
-                        operation="TweetDetail",
-                        variables=traversal.latest_request,
-                    )
-                    archived_response_number = traversal.latest_response_number
-                save_profiles()
-                store.append_page(page, None, count_page=traversal.page_was_fetched)
-        except Exception:
+            with closing(traversal.pages()) as pages:
+                for page in pages:
+                    if traversal.latest_response_number > archived_response_number:
+                        assert (
+                            traversal.latest_payload is not None
+                            and traversal.latest_request is not None
+                        )
+                        store.archive_response(
+                            traversal.latest_payload,
+                            operation="TweetDetail",
+                            variables=traversal.latest_request,
+                        )
+                        archived_response_number = traversal.latest_response_number
+                    save_profiles()
+                    store.append_page(page, None, count_page=traversal.page_was_fetched)
+        except BaseException:
             if traversal.latest_response_number > archived_response_number:
                 assert (
                     traversal.latest_payload is not None

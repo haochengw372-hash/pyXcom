@@ -170,6 +170,21 @@ with XClient(profile="Default") as client:
 
 The seed can be a main post or a reply. `max_depth=2` follows two reply levels below that seed. `max_comments` is the cumulative descendant cap and excludes the seed; `max_pages` limits requests during this call.
 
+For a large conversation, enable bounded concurrency **within that post**:
+
+```python
+result = client.save_post_comments(
+    post_id, "data/conversation", max_depth=2,
+    max_comments=None, max_pages=20, comment_workers=4,
+)
+```
+
+`comment_workers` accepts 1–8 and defaults to 1. Independent branches overlap;
+same-focal requests stay sequential, and one coordinator commits results in the
+original queue order. Uncommitted successful reads are archived for resume if a
+cap or interruption stops processing. Concurrency does not raise request quotas.
+See [branch concurrency](docs/comment-concurrency.md) for budgets, pacing and test results.
+
 Repeat the same seed, depth, dates and output directory to resume. Raise the comment cap to continue a capped dataset. Pending page records are retained so a cap does not discard the rest of a partly processed page.
 
 For a main-post seed, the root enters `posts.csv` and descendants enter `comments.csv`. A reply seed remains in `comments.csv`. `seed_post_id` and `seed_relative_depth` describe the requested branch; platform root, parent and depth fields describe the retained ancestry. Unknown ancestry stays unresolved. `get_post_comments()` and `iter_post_comments()` return descendants without writing a dataset.

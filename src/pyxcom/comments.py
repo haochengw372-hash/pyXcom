@@ -3,9 +3,15 @@
 import time
 import json
 import hashlib
+import sys
+from ._comment_requests import (
+    CommentRequests,
+    decode_prefetched,
+    validate_comment_workers,
+)
 from dataclasses import replace
 from datetime import date
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Iterator, Generator
 
 from .errors import IntegrityError, ParseError, RateLimitError
 from ._persistence import read_jsonl
@@ -17,7 +23,9 @@ if TYPE_CHECKING:
     from .client import XClient
 
 
-def parse_conversation(data: dict) -> tuple[list[Post], list[str], dict]:
+def parse_conversation(
+    data: dict, *, captured_at_utc: str | None = None
+) -> tuple[list[Post], list[str], dict]:
     """Read timeline content only, excluding embedded quotes and recommendations."""
     instructions = next(
         (
@@ -32,7 +40,7 @@ def parse_conversation(data: dict) -> tuple[list[Post], list[str], dict]:
     posts: dict[str, Post] = {}
     cursors: list[str] = []
     profiles: dict[str, dict] = {}
-    captured = now_utc()
+    captured = captured_at_utc or now_utc()
 
     def visit(node):
         if isinstance(node, list):
@@ -148,6 +156,54 @@ def restore_archived_stalls(store) -> None:
     }
 
 
+def prefetch_callbacks(store):
+    """Load verified buffered reads and archive new buffers in the writer thread."""
+    state = store.state.get("conversation", {})
+    entries = state.get("prefetched_pages", [])
+    log = store.output_dir / ".pyxcom/collection_log.jsonl"
+
+    def read_raw(name):
+        path = store.output_dir / name
+        if any(
+            p.is_symlink() for p in (store.output_dir / ".pyxcom", path.parent, path)
+        ):
+            raise IntegrityError("Prefetched comment archive cannot follow symlinks")
+        return path.read_bytes()
+
+    retained = decode_prefetched(
+        entries,
+        state.get("queue", []),
+        list(read_jsonl(log)) if entries else [],
+        read_raw,
+    )
+
+    def retain(task, payload, captured):
+        valid = True
+        try:
+            parse_conversation(payload, captured_at_utc=captured)
+        except (ParseError, ValueError, TypeError, KeyError, AttributeError):
+            valid = False
+        path = store.archive_response(
+            payload,
+            operation="TweetDetailPrefetch" if valid else "TweetDetailPrefetchUnparsed",
+            variables={
+                "focalTweetId": task[0],
+                **({"cursor": task[1]} if task[1] is not None else {}),
+            },
+        )
+        if not valid:
+            return None
+        return {
+            "focal_id": task[0],
+            "cursor": task[1],
+            "captured_at_utc": captured,
+            "raw_path": str(path.relative_to(store.output_dir)),
+            "raw_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+
+    return retained, retain
+
+
 class CommentTraversal:
     def __init__(
         self,
@@ -162,7 +218,12 @@ class CommentTraversal:
         since: str | None = None,
         until: str | None = None,
         retry_stalled: bool = False,
+        comment_workers: int = 1,
+        retained=None,
+        retain=None,
     ):
+        self.comment_workers = validate_comment_workers(comment_workers)
+        self.retained, self.retain = retained, retain
         if not isinstance(retry_stalled, bool):
             raise ValueError("retry_stalled must be boolean")
         if max_depth is None:
@@ -313,7 +374,26 @@ class CommentTraversal:
             if not progressed:
                 return added
 
-    def pages(self) -> Iterator[list[Post]]:
+    def pages(self) -> Generator[list[Post], None, None]:
+        requests = CommentRequests(
+            self.client,
+            self.state,
+            self.comment_workers,
+            retained=self.retained,
+            retain=self.retain,
+        )
+        try:
+            yield from self._pages(requests)
+        finally:
+            interrupted = sys.exc_info()[0] is not None
+            requests.close()
+            if isinstance(requests.error, RateLimitError):
+                self.complete = False
+                self.reason = "rate_limited"
+            elif requests.error is not None and not interrupted:
+                raise requests.error
+
+    def _pages(self, requests) -> Iterator[list[Post]]:
         if self.root_id not in self.records:
             root = self.client.get_post(self.root_id)
             if root.reposted_post_id:
@@ -360,7 +440,13 @@ class CommentTraversal:
             task = self.state["queue"][0]
             focal, cursor = task
             try:
-                payload = self.client._x.conversation_page(focal, cursor=cursor)
+                payload, captured = requests.get(
+                    task,
+                    self.state["queue"],
+                    None
+                    if self.max_pages is None
+                    else self.max_pages - self.pages_fetched,
+                )
             except RateLimitError as exc:
                 self.state["rate_reset_at"] = exc.reset_at
                 self.reason = "rate_limited"
@@ -370,7 +456,9 @@ class CommentTraversal:
             self.latest_request = {"focalTweetId": focal}
             if cursor is not None:
                 self.latest_request["cursor"] = cursor
-            posts, cursors, profiles = parse_conversation(payload)
+            posts, cursors, profiles = parse_conversation(
+                payload, captured_at_utc=captured
+            )
             self.state.pop("rate_reset_at", None)
             self.state["queue"].pop(0)
             self.state["visited"].append(task)
@@ -409,5 +497,5 @@ class CommentTraversal:
             self.pages_fetched += 1
             self.page_was_fetched = True
             yield self._accept_pending()
-            if self.client.delay:
+            if self.client.delay and self.comment_workers == 1:
                 time.sleep(self.client.delay)

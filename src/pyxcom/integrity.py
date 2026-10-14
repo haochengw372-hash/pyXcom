@@ -89,6 +89,10 @@ def _replay_comments(
     if query.get("kind") != "post_comments":
         return False
     logs = _rows(files, _source_name(files, "collection_log.jsonl"))
+    from ._comment_requests import decode_prefetched
+
+    decode_prefetched(state.get("conversation", {}).get("prefetched_pages", []),
+        state.get("conversation", {}).get("queue", []), logs, lambda name: files[name])
     responses = [
         row
         for row in logs

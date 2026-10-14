@@ -46,7 +46,7 @@ Jobs never change accounts to escape a rate limit. New request logs record
 | `search_query` | Native search expression | `since`, `until`, `limit` |
 | `post_quotes` | Post ID or URL | `since`, `until`, `limit` |
 | `user_posts`, `user_replies`, `user_reposts` | Account handle | `since`, `until`, `limit` |
-| `post_comments` | Post ID or URL | `since`, `until`, `max_depth`, `max_comments` |
+| `post_comments` | Post ID or URL | `since`, `until`, `max_depth`, `max_comments`, `comment_workers` |
 | `followers`, `following` | Numeric user ID | `limit`, `snapshot_id` |
 | `post_reposters` | Post ID or URL | `limit`, `snapshot_id` |
 
@@ -127,3 +127,10 @@ export at the end of its slice. One-page slices provide frequent rotation and
 feedback at the cost of repeatedly verifying and exporting the accumulated
 dataset. Larger slices hold an observer longer; keep request timeouts and a
 dispatch deadline. The default remains one page for compatibility.
+
+For `post_comments`, `options={"comment_workers": 4}` allows independent branches
+inside that job to overlap. This is separate from `run(max_workers=...)`, which
+limits simultaneous jobs. Give the slice enough pages (for example `page_budget=8`);
+a one-page slice has no room for branch concurrency. The per-observer attempt
+gate serializes request starts, including retries, across the branch threads.
+Account ownership and cooldown rules still apply. See [branch concurrency](comment-concurrency.md).

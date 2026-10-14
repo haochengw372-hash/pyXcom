@@ -51,6 +51,7 @@ class XTransport:
         self._request_gate: Callable[[str], None] | None = None
         self._request_observer: Callable[[dict], None] | None = None
         self.last_error: dict | None = None
+        self._comment_requests = None
 
     def close(self) -> None:
         self._x.close()
